@@ -405,6 +405,169 @@ if (cmd === 'help' || cmd === 'pokemon') {
     return res.send('⚠️ PokéCenter hiccup, try again!');
   }
 });
+app.get('/battle-data', async (req, res) => {
+  try {
+    const db = await getDB();
+    const keys = Object.keys(db.activeBattles || {});
+    const activeKey = keys.find(k => db.activeBattles[k].p2Mon) || keys[0];
+    res.json({
+      active: Boolean(activeKey),
+      battle: activeKey ? db.activeBattles[activeKey] : null,
+      spawn: db.activeSpawn || null
+    });
+  } catch (e) {
+    res.json({ active: false, battle: null, spawn: null });
+  }
+});
 
+// Game Boy Color OBS Overlay Page
+app.get('/overlay', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: transparent; font-family: 'Press Start 2P', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    #spawn-card, #gbc-frame { display: none; background: #2b2d42; border: 6px solid #1a1b26; border-radius: 16px 16px 40px 16px; padding: 18px 22px 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.8); }
+    #spawn-card { width: 440px; }
+    #gbc-frame { width: 680px; }
+    #spawn-screen, #screen { background: #f8f8f8; border: 5px solid #111; border-radius: 6px; padding: 14px; color: #181818; }
+    #spawn-screen { text-align: center; }
+    .spawn-banner { background: #181818; color: #fff; font-size: 10px; padding: 6px; border-radius: 4px; margin-bottom: 10px; }
+    .spawn-banner.shiny { background: #d97706; }
+    .sprite { width: 136px; height: 136px; image-rendering: pixelated; object-fit: contain; }
+    #spawn-name { font-size: 15px; margin: 8px 0; }
+    #spawn-types { font-size: 10px; color: #555; margin-bottom: 12px; }
+    .spawn-cta { border-top: 3px dashed #999; padding-top: 10px; font-size: 11px; color: #16a34a; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
+    .hud-box { border: 4px solid #181818; border-radius: 4px; padding: 8px 10px; width: 290px; }
+    .name { font-size: 13px; margin-bottom: 4px; }
+    .trainer { font-size: 9px; color: #555; margin-bottom: 6px; }
+    .hp-wrap { display: flex; align-items: center; gap: 6px; }
+    .hp-label { font-size: 9px; color: #d97706; }
+    .hp-bar-bg { flex: 1; height: 10px; background: #ccc; border: 2px solid #181818; }
+    .hp-bar-fill { height: 100%; background: #22c55e; transition: width 0.4s ease; }
+    .hp-num { font-size: 10px; text-align: right; margin-top: 5px; }
+    #dialog-box { margin-top: 10px; border: 4px solid #181818; border-radius: 6px; padding: 12px; background: #fff; min-height: 112px; }
+    #log-text { font-size: 11px; line-height: 1.6; margin-bottom: 10px; }
+    #moves-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 2px dashed #999; padding-top: 8px; }
+    .move-item { font-size: 10px; }
+    .brand { text-align: center; margin-top: 12px; font-size: 13px; letter-spacing: 2px; color: #8d99ae; }
+    .brand span:nth-child(1) { color: #ef4444; } .brand span:nth-child(2) { color: #a855f7; } .brand span:nth-child(3) { color: #22c55e; } .brand span:nth-child(4) { color: #eab308; } .brand span:nth-child(5) { color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <div id="spawn-card">
+    <div id="spawn-screen">
+      <div id="spawn-banner" class="spawn-banner">WILD POKÉMON APPEARED!</div>
+      <img id="spawn-sprite" class="sprite" src="">
+      <div id="spawn-name"></div>
+      <div id="spawn-types"></div>
+      <div class="spawn-cta">TYPE !catch IN CHAT!</div>
+    </div>
+    <div class="brand">GAME BOY <span>C</span><span>O</span><span>L</span><span>O</span><span>R</span></div>
+  </div>
+
+  <div id="gbc-frame">
+    <div id="screen">
+      <div class="row">
+        <div class="hud-box">
+          <div class="name" id="p2-name"></div>
+          <div class="trainer" id="p2-user"></div>
+          <div class="hp-wrap"><span class="hp-label">HP</span><div class="hp-bar-bg"><div class="hp-bar-fill" id="p2-hp-bar"></div></div></div>
+          <div class="hp-num" id="p2-hp-text"></div>
+        </div>
+        <img id="p2-sprite" class="sprite" src="">
+      </div>
+      <div class="row" style="margin-top: 6px;">
+        <img id="p1-sprite" class="sprite" src="">
+        <div class="hud-box">
+          <div class="name" id="p1-name"></div>
+          <div class="trainer" id="p1-user"></div>
+          <div class="hp-wrap"><span class="hp-label">HP</span><div class="hp-bar-bg"><div class="hp-bar-fill" id="p1-hp-bar"></div></div></div>
+          <div class="hp-num" id="p1-hp-text"></div>
+        </div>
+      </div>
+      <div id="dialog-box">
+        <div id="log-text"></div>
+        <div id="moves-grid"></div>
+      </div>
+    </div>
+    <div class="brand">GAME BOY <span>C</span><span>O</span><span>L</span><span>O</span><span>R</span></div>
+  </div>
+
+  <script>
+    function setSprite(img, mon, back) {
+      if (!mon) return;
+      const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+      const front = base + (mon.isShiny ? '/shiny/' : '/') + mon.id + '.png';
+      const rear = base + (mon.isShiny ? '/back/shiny/' : '/back/') + mon.id + '.png';
+      img.onerror = () => { if (img.src !== front) img.src = front; };
+      img.src = back ? rear : front;
+    }
+    function setHp(el, cur, max) {
+      const pct = Math.max(0, Math.min(100, (cur / max) * 100));
+      el.style.width = pct + '%';
+      el.style.background = pct > 50 ? '#22c55e' : (pct > 20 ? '#eab308' : '#ef4444');
+    }
+    async function tick() {
+      try {
+        const res = await fetch('/battle-data');
+        const data = await res.json();
+        const frame = document.getElementById('gbc-frame');
+        const card = document.getElementById('spawn-card');
+
+        if (data.active && data.battle) {
+          card.style.display = 'none';
+          frame.style.display = 'block';
+          const b = data.battle;
+          document.getElementById('p1-name').textContent = (b.p1Mon.isShiny ? '✨' : '') + b.p1Mon.name;
+          document.getElementById('p1-user').textContent = '@' + b.p1;
+          document.getElementById('p1-hp-text').textContent = b.p1Mon.currentHp + '/' + b.p1Mon.maxHp;
+          setSprite(document.getElementById('p1-sprite'), b.p1Mon, true);
+          setHp(document.getElementById('p1-hp-bar'), b.p1Mon.currentHp, b.p1Mon.maxHp);
+
+          if (b.p2Mon) {
+            document.getElementById('p2-name').textContent = (b.p2Mon.isShiny ? '✨' : '') + b.p2Mon.name;
+            document.getElementById('p2-user').textContent = '@' + b.p2;
+            document.getElementById('p2-hp-text').textContent = b.p2Mon.currentHp + '/' + b.p2Mon.maxHp;
+            setSprite(document.getElementById('p2-sprite'), b.p2Mon, false);
+            document.getElementById('p2-sprite').style.visibility = 'visible';
+            setHp(document.getElementById('p2-hp-bar'), b.p2Mon.currentHp, b.p2Mon.maxHp);
+          } else {
+            document.getElementById('p2-name').textContent = 'WAITING...';
+            document.getElementById('p2-user').textContent = '@' + b.p2;
+            document.getElementById('p2-hp-text').textContent = '--/--';
+            document.getElementById('p2-sprite').style.visibility = 'hidden';
+          }
+          const activeMon = (b.turn === b.p2 && b.p2Mon) ? b.p2Mon : b.p1Mon;
+          document.getElementById('log-text').textContent = '@' + b.turn + '\\'s turn (!move 1-4)';
+          document.getElementById('moves-grid').innerHTML = activeMon.moves.map((m, i) => '<div class="move-item">!' + (i + 1) + ' ' + m.name.toUpperCase() + '</div>').join('');
+          return;
+        }
+
+        frame.style.display = 'none';
+        const s = data.spawn;
+        if (s && s.spawnedAt && (Date.now() - s.spawnedAt) < 20000) {
+          card.style.display = 'block';
+          const banner = document.getElementById('spawn-banner');
+          banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
+          banner.classList.toggle('shiny', Boolean(s.isShiny));
+          setSprite(document.getElementById('spawn-sprite'), s, false);
+          document.getElementById('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
+          document.getElementById('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
+        } else {
+          card.style.display = 'none';
+        }
+      } catch (e) {}
+    }
+    setInterval(tick, 1500);
+    tick();
+  </script>
+</body>
+</html>`);
+});
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
