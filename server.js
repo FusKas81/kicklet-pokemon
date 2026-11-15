@@ -264,9 +264,7 @@ app.get('/spawn', checkSecret, async (req, res) => {
     await saveDB(db);
 
     const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-    const msg = `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`;
-    await sendKickChatMessage(db, msg);
-    res.send(msg);
+    res.send(`🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`);
   } catch (err) {
     console.error(err);
     res.send('⚠️ Spawn error - check Render logs.');
