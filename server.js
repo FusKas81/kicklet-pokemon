@@ -378,7 +378,11 @@ app.get('/command', checkSecret, async (req, res) => {
       await saveDB(db);
       return res.send(`⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). @${opponentUser}'s turn!`);
     }
-
+if (cmd === 'help' || cmd === 'pokemon') {
+      return res.send(
+        '🎮 Pokémon Commands: !catch (catch spawn) | !party (view 1-10) | !info <1-10> (moves/HP) | !release <1-10> | !pokedex | !leaderboard | !trade @user <slot> & !accept <slot> | !battle @user <slot> & !move <1-4> (3 of a kind auto-evolves!)'
+      );
+    }
     return res.send('Unknown command.');
   } catch (err) {
     console.error(err);
