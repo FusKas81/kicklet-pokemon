@@ -19,8 +19,7 @@ const StateSchema = new mongoose.Schema({
   users: { type: Object, default: {} },
   activeSpawn: { type: Object, default: null },
   pendingTrades: { type: Object, default: {} },
-  activeBattles: { type: Object, default: {} },
-  kickAuth: { type: Object, default: null }
+  activeBattles: { type: Object, default: {} }
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
