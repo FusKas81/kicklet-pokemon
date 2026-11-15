@@ -183,7 +183,7 @@ app.get('/spawn', checkSecret, async (req, res) => {
     const db = await getDB();
     const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
     const mon = await generatePokemon(randomId);
-    db.activeSpawn = { ...mon, caughtBy: [] };
+    db.activeSpawn = { ...mon, caughtBy: [], spawnedAt: Date.now() };
     await saveDB(db);
 
     const shinyTag = mon.isShiny ? '✨SHINY ' : '';
