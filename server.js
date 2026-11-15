@@ -19,7 +19,8 @@ const StateSchema = new mongoose.Schema({
   users: { type: Object, default: {} },
   activeSpawn: { type: Object, default: null },
   pendingTrades: { type: Object, default: {} },
-  activeBattles: { type: Object, default: {} }
+  activeBattles: { type: Object, default: {} },
+  kickAuth: { type: Object, default: null }
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
@@ -175,7 +176,84 @@ async function checkEvolution(db, user) {
   }
   return null;
 }
+async function getKickAccessToken(db) {
+  if (!db.kickAuth || !db.kickAuth.refresh_token) return null;
 
+  // Refresh token if expired or expiring within 2 minutes
+  if (Date.now() > (db.kickAuth.expires_at - 120000)) {
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: process.env.KICK_CLIENT_ID,
+      client_secret: process.env.KICK_CLIENT_SECRET,
+      refresh_token: db.kickAuth.refresh_token
+    });
+    const { data } = await axios.post('https://id.kick.com/oauth/token', params);
+    db.kickAuth = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: Date.now() + data.expires_in * 1000
+    };
+    docMarkAndSaveKick(db);
+  }
+  return db.kickAuth.access_token;
+}
+
+async function docMarkAndSaveKick(db) {
+  db.markModified('kickAuth');
+  await db.save();
+}
+
+async function sendKickChatMessage(db, content) {
+  try {
+    const token = await getKickAccessToken(db);
+    if (!token || !process.env.KICK_BROADCASTER_ID) return;
+
+    await axios.post(
+      'https://api.kick.com/public/v1/chat',
+      {
+        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
+        content,
+        type: 'bot'
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (err) {
+    console.error('❌ Kick Chat Post Error:', err.response?.data || err.message);
+  }
+}
+
+// One-time login route to authorize Kick chat posting
+app.get('/kick-login', checkSecret, (req, res) => {
+  const redirectUri = 'https://kicklet-pokemon.onrender.com/kick-callback';
+  const authUrl = `https://id.kick.com/oauth/authorize?response_type=code&client_id=${process.env.KICK_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=chat:write+user:read&code_challenge=plain_challenge_123&code_challenge_method=plain`;
+  res.redirect(authUrl);
+});
+
+app.get('/kick-callback', async (req, res) => {
+  try {
+    const code = req.query.code;
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: process.env.KICK_CLIENT_ID,
+      client_secret: process.env.KICK_CLIENT_SECRET,
+      redirect_uri: 'https://kicklet-pokemon.onrender.com/kick-callback',
+      code_verifier: 'plain_challenge_123',
+      code
+    });
+    const { data } = await axios.post('https://id.kick.com/oauth/token', params);
+    const db = await getDB();
+    db.kickAuth = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: Date.now() + data.expires_in * 1000
+    };
+    await docMarkAndSaveKick(db);
+    res.send('✅ Kick Chat connected! Your 15-minute spawns will now post automatically in chat.');
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.send('❌ Kick authorization failed. Check Render logs.');
+  }
+});
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
 app.get('/spawn', checkSecret, async (req, res) => {
@@ -187,7 +265,9 @@ app.get('/spawn', checkSecret, async (req, res) => {
     await saveDB(db);
 
     const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-    res.send(`🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`);
+    const msg = `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`;
+    await sendKickChatMessage(db, msg);
+    res.send(msg);
   } catch (err) {
     console.error(err);
     res.send('⚠️ Spawn error - check Render logs.');
