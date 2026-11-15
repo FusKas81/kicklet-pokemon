@@ -378,11 +378,27 @@ app.get('/command', checkSecret, async (req, res) => {
       await saveDB(db);
       return res.send(`⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). @${opponentUser}'s turn!`);
     }
+if (cmd === 'forfeit') {
+      const battleKey = Object.keys(db.activeBattles).find(k => k.split('_vs_').includes(user));
+      if (!battleKey) return res.send(`@${user} You are not in an active battle.`);
+
+      const battle = db.activeBattles[battleKey];
+      const opponent = battle.p1 === user ? battle.p2 : battle.p1;
+      const wasAccepted = Boolean(battle.p2Mon);
+
+      delete db.activeBattles[battleKey];
+      await saveDB(db);
+
+      if (!wasAccepted) {
+        return res.send(`🏳️ @${user} canceled the battle challenge with @${opponent}.`);
+      }
+      return res.send(`🏳️ @${user} forfeited the battle! 🏆 @${opponent} wins by default!`);
+    }    
 if (cmd === 'help' || cmd === 'pokemon') {
       return res.send(
         '🎮 Pokémon Commands: !catch (catch spawn) | !party (view 1-10) | !info <1-10> (moves/HP) | !release <1-10> | !pokedex | !leaderboard | !trade @user <slot> & !accept <slot> | !battle @user <slot> & !move <1-4> (3 of a kind auto-evolves!)'
       );
-    }
+    }    
     return res.send('Unknown command.');
   } catch (err) {
     console.error(err);
