@@ -5,8 +5,14 @@ import mongoose from 'mongoose';
 const app = express();
 app.use(express.json());
 
-// Connect to Password-Protected MongoDB Database
-await mongoose.connect(process.env.MONGO_URI);
+// Connect to MongoDB safely with clear error logging
+if (!process.env.MONGO_URI) {
+  console.error('❌ ERROR: MONGO_URI environment variable is missing in Render!');
+} else {
+  mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log('✅ Connected to MongoDB successfully!'))
+    .catch(err => console.error('❌ MongoDB Connection Error:', err.message));
+}
 
 const StateSchema = new mongoose.Schema({
   _id: String,
@@ -36,7 +42,6 @@ const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 1025;
 const MAX_INVENTORY = 10;
 
-// Password Check Middleware (Protects /spawn and /command from trolls)
 function checkSecret(req, res, next) {
   if (process.env.BOT_SECRET && req.query.secret !== process.env.BOT_SECRET) {
     return res.status(401).send('Unauthorized');
@@ -174,28 +179,33 @@ async function checkEvolution(db, user) {
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
 app.get('/spawn', checkSecret, async (req, res) => {
-  const db = await getDB();
-  const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
-  const mon = await generatePokemon(randomId);
-  db.activeSpawn = { ...mon, caughtBy: [] };
-  await saveDB(db);
+  try {
+    const db = await getDB();
+    const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
+    const mon = await generatePokemon(randomId);
+    db.activeSpawn = { ...mon, caughtBy: [] };
+    await saveDB(db);
 
-  const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-  res.send(`🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`);
+    const shinyTag = mon.isShiny ? '✨SHINY ' : '';
+    res.send(`🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`);
+  } catch (err) {
+    console.error(err);
+    res.send('⚠️ Spawn error - check Render logs.');
+  }
 });
 
 app.get('/command', checkSecret, async (req, res) => {
-  const db = await getDB();
-  const user = (req.query.user || '').toLowerCase().replace('@', '');
-  const cmd = (req.query.cmd || '').toLowerCase();
-  const args = (req.query.args || '').trim().split(/\s+/).filter(Boolean);
-
-  if (!user) return res.send('Missing user.');
-  if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
-  if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
-  if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
-
   try {
+    const db = await getDB();
+    const user = (req.query.user || '').toLowerCase().replace('@', '');
+    const cmd = (req.query.cmd || '').toLowerCase();
+    const args = (req.query.args || '').trim().split(/\s+/).filter(Boolean);
+
+    if (!user) return res.send('Missing user.');
+    if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
+    if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
+    if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
+
     if (cmd === 'catch') {
       const spawn = db.activeSpawn;
       if (!spawn) return res.send(`@${user} No wild Pokémon right now!`);
@@ -371,8 +381,10 @@ app.get('/command', checkSecret, async (req, res) => {
 
     return res.send('Unknown command.');
   } catch (err) {
+    console.error(err);
     return res.send('⚠️ PokéCenter hiccup, try again!');
   }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log('Bot online!'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
