@@ -26,7 +26,8 @@ const defaultState = {
   lastEvolution: null,
   activeBattle: null,
   kickAuth: null,
-  oauthPkce: {}
+  oauthPkce: {},
+  lastWebhookDebug: null
 };
 
 let memoryState = JSON.parse(JSON.stringify(defaultState));
@@ -135,7 +136,6 @@ async function fetchPokemonData(idOrName, forceShiny = null) {
   const spDef = Math.floor(((2 * (statsMap['special-defense'] || 60)) * level) / 100) + 5;
   const spd = Math.floor(((2 * (statsMap.speed || 60)) * level) / 100) + 5;
 
-  // Pick up to 4 real damaging moves with official power & accuracy
   const candidateMoves = data.moves
     .map(m => m.move)
     .sort(() => 0.5 - Math.random())
@@ -220,13 +220,15 @@ async function getNextEvolutionName(speciesUrl, currentRawName) {
   }
 }
 
-// --- KICK OAUTH & CHAT API INTEGRATION ---
+// --- KICK OAUTH, WEBHOOK SUBSCRIPTION & FOLLOWERS-ONLY CHAT API ---
 function base64UrlEncode(buf) {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function refreshKickTokenIfNeeded(db) {
-  if (!db.kickAuth || !db.kickAuth.refresh_token) return db.kickAuth ? db.kickAuth.access_token : null;
+  if (!db.kickAuth || !db.kickAuth.refresh_token) {
+    return db.kickAuth ? db.kickAuth.access_token : null;
+  }
   if (db.kickAuth.expires_at && Date.now() < db.kickAuth.expires_at - 60000) {
     return db.kickAuth.access_token;
   }
@@ -259,6 +261,32 @@ async function refreshKickTokenIfNeeded(db) {
   return db.kickAuth.access_token;
 }
 
+async function subscribeKickChatWebhook(accessToken, broadcasterUserId) {
+  try {
+    const payload = {
+      events: [{ name: 'chat.message.sent', version: 1 }],
+      method: 'webhook'
+    };
+    if (broadcasterUserId) {
+      payload.broadcaster_user_id = Number(broadcasterUserId);
+    }
+    const res = await fetch('https://api.kick.com/public/v1/events/subscriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    console.log('Kick webhook subscription response:', res.status, text);
+    return { ok: res.ok, status: res.status, body: text };
+  } catch (err) {
+    console.error('Kick webhook subscription failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 async function sendKickChatMessage(message, broadcasterUserId = null) {
   const db = await getDB();
   const token = await refreshKickTokenIfNeeded(db);
@@ -266,13 +294,15 @@ async function sendKickChatMessage(message, broadcasterUserId = null) {
     console.log('No Kick OAuth token configured. Message skipped:', message);
     return { ok: false, error: 'No OAuth token' };
   }
-  const targetBroadcaster = broadcasterUserId || (db.kickAuth && db.kickAuth.broadcaster_user_id);
+
+  // Always use the authenticated broadcaster_user_id with type: 'user' so Followers-Only chat allows the reply
+  const targetBroadcaster = Number(broadcasterUserId || (db.kickAuth && db.kickAuth.broadcaster_user_id));
   const body = {
     content: message.slice(0, 500),
     type: 'user'
   };
-  if (targetBroadcaster) {
-    body.broadcaster_user_id = Number(targetBroadcaster);
+  if (targetBroadcaster && !Number.isNaN(targetBroadcaster)) {
+    body.broadcaster_user_id = targetBroadcaster;
   }
 
   try {
@@ -286,10 +316,10 @@ async function sendKickChatMessage(message, broadcasterUserId = null) {
     });
     const text = await res.text();
     if (!res.ok) {
-      console.error('Kick Chat API error:', res.status, text);
-      return { ok: false, status: res.status, body: text };
+      console.error('Kick Chat API error:', res.status, text, 'Payload:', JSON.stringify(body));
+      return { ok: false, status: res.status, body: text, sentPayload: body };
     }
-    return { ok: true, body: text };
+    return { ok: true, status: res.status, body: text };
   } catch (err) {
     console.error('Kick Chat send exception:', err.message);
     return { ok: false, error: err.message };
@@ -322,7 +352,7 @@ app.get('/auth/kick/callback', async (req, res) => {
   const { code, state } = req.query;
   const db = await getDB();
   if (!code || !db.oauthPkce || db.oauthPkce.state !== state) {
-    return res.status(400).send('Invalid OAuth state or missing code.');
+    return res.status(400).send('Invalid OAuth state or missing code. Please visit /auth/kick again.');
   }
 
   try {
@@ -346,6 +376,7 @@ app.get('/auth/kick/callback', async (req, res) => {
     }
 
     let broadcasterUserId = null;
+    let broadcasterName = null;
     try {
       const userRes = await fetch('https://api.kick.com/public/v1/users', {
         headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
@@ -353,19 +384,24 @@ app.get('/auth/kick/callback', async (req, res) => {
       const userJson = await userRes.json();
       if (userJson.data && userJson.data[0]) {
         broadcasterUserId = userJson.data[0].user_id;
+        broadcasterName = userJson.data[0].name || userJson.data[0].username;
       }
     } catch (_) {}
+
+    const subResult = await subscribeKickChatWebhook(tokenData.access_token, broadcasterUserId);
 
     db.kickAuth = {
       access_token: tokenData.access_token,
       refresh_token: tokenData.refresh_token,
       expires_at: Date.now() + (tokenData.expires_in || 3600) * 1000,
-      broadcaster_user_id: broadcasterUserId
+      broadcaster_user_id: broadcasterUserId,
+      broadcaster_name: broadcasterName,
+      webhook_sub: subResult
     };
     db.oauthPkce = {};
     await saveDB(db);
 
-    res.send('Kick OAuth connected successfully! You can close this tab and test commands in chat.');
+    res.send(`Kick OAuth connected for ${broadcasterName || broadcasterUserId}! Followers-Only chat mode active (type: user). Webhook status: ${subResult.status || 'checked'}. You can close this tab.`);
   } catch (err) {
     res.status(500).send('OAuth callback error: ' + err.message);
   }
@@ -373,10 +409,13 @@ app.get('/auth/kick/callback', async (req, res) => {
 
 app.get('/debug-kick', async (req, res) => {
   const db = await getDB();
-  const result = await sendKickChatMessage('PokéBot online! Type !pokehelp to view commands.');
+  const result = await sendKickChatMessage('PokéBot online! Followers-only mode ready — type !pokehelp for commands.');
   res.json({
     hasAuth: Boolean(db.kickAuth && db.kickAuth.access_token),
     broadcaster_user_id: db.kickAuth ? db.kickAuth.broadcaster_user_id : null,
+    broadcaster_name: db.kickAuth ? db.kickAuth.broadcaster_name : null,
+    webhook_sub: db.kickAuth ? db.kickAuth.webhook_sub : null,
+    lastWebhookDebug: db.lastWebhookDebug || null,
     sendResult: result
   });
 });
@@ -462,7 +501,6 @@ async function processCommand(sender, rawText) {
         const anyShiny = sameIndices.slice(0, 3).some(idx => user.party[idx].isShiny);
         const evolvedMon = await fetchPokemonData(nextEvoName, anyShiny);
 
-        // Remove the 3 base copies (highest index first) and add evolved Pokémon
         const toRemove = sameIndices.slice(0, 3).sort((a, b) => b - a);
         for (const idx of toRemove) {
           user.party.splice(idx, 1);
@@ -576,7 +614,7 @@ async function processCommand(sender, rawText) {
     return `🔥 Battle started! ${b.p1Mon.name} vs ${p2Mon.name}! @${b.turn} goes first: ${movesStr}`;
   }
 
-  if (cmd === '!move') {
+  if (cmd === '!move' || cmd === '!1' || cmd === '!2' || cmd === '!3' || cmd === '!4') {
     const b = db.activeBattle;
     if (!b || !b.p2Mon) {
       return `@${sender} No active battle in progress.`;
@@ -585,7 +623,8 @@ async function processCommand(sender, rawText) {
       return `@${sender} It's @${b.turn}'s turn!`;
     }
 
-    const moveIdx = (parseInt(arg1, 10) || 1) - 1;
+    const moveNum = cmd === '!move' ? (parseInt(arg1, 10) || 1) : parseInt(cmd.slice(1), 10);
+    const moveIdx = Math.max(0, Math.min(3, moveNum - 1));
     const isP1 = b.turn.toLowerCase() === b.p1.toLowerCase();
     const attacker = isP1 ? b.p1Mon : b.p2Mon;
     const defender = isP1 ? b.p2Mon : b.p1Mon;
@@ -664,8 +703,8 @@ app.get('/spawn', async (req, res) => {
   try {
     const db = await getDB();
     const announcement = await triggerWildSpawn(db);
-    await sendKickChatMessage(announcement);
-    res.json({ ok: true, announcement, spawn: db.currentSpawn });
+    const chatRes = await sendKickChatMessage(announcement);
+    res.json({ ok: true, announcement, chatRes, spawn: db.currentSpawn });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -675,13 +714,25 @@ app.post('/kick-webhook', async (req, res) => {
   res.sendStatus(200);
   try {
     const payload = req.body || {};
-    const content = payload.content || (payload.message && payload.message.content) || '';
-    const senderObj = payload.sender || (payload.message && payload.message.sender) || {};
-    const sender = senderObj.username || senderObj.slug || 'Trainer';
-    const broadcasterId = (payload.broadcaster && payload.broadcaster.user_id) || null;
+    const eventType = req.headers['kick-event-type'] || payload.event || 'chat.message.sent';
+    const data = payload.data || payload;
 
-    // Ignore bot's own announcements to prevent loops
-    if (!content || !content.startsWith('!')) return;
+    const content = data.content || (data.message && data.message.content) || '';
+    const senderObj = data.sender || (data.message && data.message.sender) || {};
+    const sender = senderObj.username || senderObj.slug || senderObj.name || 'Trainer';
+    const broadcasterId = (data.broadcaster && data.broadcaster.user_id) || data.broadcaster_user_id || null;
+
+    const db = await getDB();
+    db.lastWebhookDebug = {
+      at: Date.now(),
+      eventType,
+      sender,
+      content,
+      broadcasterId
+    };
+    await saveDB(db);
+
+    if (!content || !content.trim().startsWith('!')) return;
 
     const reply = await processCommand(sender, content);
     if (reply) {
@@ -1016,7 +1067,6 @@ app.get('/overlay', (req, res) => {
   </div>
 
   <script>
-    // Adjust overall 8-bit volume here (0.03 = quiet, 0.08 = medium, 0.18 = loud)
     const MASTER_VOLUME = 0.08;
 
     let audioCtx = null;
@@ -1028,6 +1078,11 @@ app.get('/overlay', (req, res) => {
       if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
       return audioCtx;
     }
+
+    window.addEventListener('pointerdown', () => {
+      const ctx = getAudioCtx();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    }, { once: true });
 
     function playTone(freq, duration, type = 'square', delay = 0, volScale = 1.0) {
       const ctx = getAudioCtx();
@@ -1046,12 +1101,12 @@ app.get('/overlay', (req, res) => {
     }
 
     function playSpawnSound(isShiny) {
-      playTone(523.25, 0.10, 'square', 0.00); // C5
-      playTone(659.25, 0.10, 'square', 0.10); // E5
-      playTone(783.99, 0.22, 'square', 0.20); // G5
+      playTone(523.25, 0.10, 'square', 0.00);
+      playTone(659.25, 0.10, 'square', 0.10);
+      playTone(783.99, 0.22, 'square', 0.20);
       if (isShiny) {
-        playTone(1046.50, 0.10, 'triangle', 0.36, 1.2); // C6
-        playTone(1318.51, 0.28, 'triangle', 0.46, 1.2); // E6
+        playTone(1046.50, 0.10, 'triangle', 0.36, 1.2);
+        playTone(1318.51, 0.28, 'triangle', 0.46, 1.2);
       }
     }
 
@@ -1086,8 +1141,8 @@ app.get('/overlay', (req, res) => {
       osc.stop(now + 0.18);
 
       if (effType === 'super') {
-        playTone(880.00, 0.08, 'square', 0.02, 1.15); // A5
-        playTone(1318.51, 0.18, 'square', 0.09, 1.25); // E6
+        playTone(880.00, 0.08, 'square', 0.02, 1.15);
+        playTone(1318.51, 0.18, 'square', 0.09, 1.25);
       }
     }
 
@@ -1110,13 +1165,13 @@ app.get('/overlay', (req, res) => {
     }
 
     function playImmuneSound() {
-      playTone(110.0, 0.09, 'sawtooth', 0.00, 1.0); // A2
-      playTone(82.41, 0.16, 'sawtooth', 0.10, 1.0); // E2
+      playTone(110.0, 0.09, 'sawtooth', 0.00, 1.0);
+      playTone(82.41, 0.16, 'sawtooth', 0.10, 1.0);
     }
 
     function playLowHpChime() {
-      playTone(783.99, 0.09, 'square', 0.22, 0.65); // G5
-      playTone(523.25, 0.12, 'square', 0.34, 0.65); // C5
+      playTone(783.99, 0.09, 'square', 0.22, 0.65);
+      playTone(523.25, 0.12, 'square', 0.34, 0.65);
     }
 
     function playFaintSound() {
@@ -1137,26 +1192,26 @@ app.get('/overlay', (req, res) => {
     }
 
     function playVictoryFanfare() {
-      playTone(783.99, 0.11, 'square', 0.00, 1.1); // G5
-      playTone(783.99, 0.11, 'square', 0.13, 1.1); // G5
-      playTone(783.99, 0.11, 'square', 0.26, 1.1); // G5
-      playTone(1046.50, 0.45, 'square', 0.39, 1.2); // C6
+      playTone(783.99, 0.11, 'square', 0.00, 1.1);
+      playTone(783.99, 0.11, 'square', 0.13, 1.1);
+      playTone(783.99, 0.11, 'square', 0.26, 1.1);
+      playTone(1046.50, 0.45, 'square', 0.39, 1.2);
     }
 
     function playCatchFanfare() {
-      playTone(587.33, 0.10, 'square', 0.15, 1.05); // D5
-      playTone(739.99, 0.10, 'square', 0.27, 1.05); // F#5
-      playTone(880.00, 0.10, 'square', 0.39, 1.05); // A5
-      playTone(1174.66, 0.42, 'square', 0.51, 1.2); // D6
+      playTone(587.33, 0.10, 'square', 0.15, 1.05);
+      playTone(739.99, 0.10, 'square', 0.27, 1.05);
+      playTone(880.00, 0.10, 'square', 0.39, 1.05);
+      playTone(1174.66, 0.42, 'square', 0.51, 1.2);
     }
 
     function playEvolutionChime() {
-      playTone(523.25, 0.10, 'square', 0.00, 1.05); // C5
-      playTone(659.25, 0.10, 'square', 0.12, 1.05); // E5
-      playTone(783.99, 0.10, 'square', 0.24, 1.05); // G5
-      playTone(1046.50, 0.14, 'square', 0.36, 1.15); // C6
-      playTone(783.99, 0.10, 'square', 0.52, 1.05); // G5
-      playTone(1046.50, 0.45, 'square', 0.64, 1.25); // C6
+      playTone(523.25, 0.10, 'square', 0.00, 1.05);
+      playTone(659.25, 0.10, 'square', 0.12, 1.05);
+      playTone(783.99, 0.10, 'square', 0.24, 1.05);
+      playTone(1046.50, 0.14, 'square', 0.36, 1.15);
+      playTone(783.99, 0.10, 'square', 0.52, 1.05);
+      playTone(1046.50, 0.45, 'square', 0.64, 1.25);
     }
 
     function triggerHitEffect(imgEl, wrapEl, dmgAmount, effType = 'normal') {
