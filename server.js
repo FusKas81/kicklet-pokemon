@@ -259,21 +259,41 @@ async function refreshKickTokenIfNeeded(db) {
   return db.kickAuth.access_token;
 }
 
-async function sendKickChatMessage(message, broadcasterUserId = null) {
-  const db = await getDB();
-  const token = await refreshKickTokenIfNeeded(db);
-  if (!token) {
-    console.log('No Kick OAuth token configured. Message skipped:', message);
-    return { ok: false, error: 'No OAuth token' };
+async function sendKickChat(db, content) {
+  const token = await getKickAccessToken(db);
+  if (!token) throw new Error('No Kick access token found.');
+
+  // Automatically fetch your exact User ID from Kick
+  if (!db.kickAuth.user_id) {
+    const userRes = await axios.get('https://api.kick.com/public/v1/users', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const userData = userRes.data?.data?.[0] || userRes.data;
+    if (userData?.user_id) {
+      db.kickAuth.user_id = Number(userData.user_id);
+      await saveDB(db);
+    }
   }
-  const targetBroadcaster = broadcasterUserId || (db.kickAuth && db.kickAuth.broadcaster_user_id);
-  const body = {
-    content: message.slice(0, 500),
-    type: 'user'
-  };
-  if (targetBroadcaster) {
-    body.broadcaster_user_id = Number(targetBroadcaster);
-  }
+
+  const broadcasterId = Number(db.kickAuth.user_id || process.env.KICK_BROADCASTER_ID);
+
+  // Send as 'bot' (posts using your Kick Developer App's bot identity)
+  const response = await axios.post(
+    'https://api.kick.com/public/v1/chat',
+    {
+      broadcaster_user_id: broadcasterId,
+      content: content.slice(0, 500),
+      type: 'bot'
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  return response.data;
+}
 
   try {
     const res = await fetch('https://api.kick.com/public/v1/chat', {
