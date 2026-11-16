@@ -89,7 +89,7 @@ async function sendKickChat(db, content) {
       {
         broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
         content: content.slice(0, 500),
-        type: 'bot'
+        type: 'user'
       },
       { headers: { Authorization: `Bearer ${token}` } }
     );
