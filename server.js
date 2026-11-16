@@ -336,11 +336,15 @@ app.get('/auth/kick', async (req, res) => {
   db.oauthPkce = { state, codeVerifier, createdAt: Date.now() };
   await saveDB(db);
 
+  const requestedScope = req.query.scope
+    ? String(req.query.scope)
+    : 'user:read channel:read chat:write events:subscribe';
+
   const authUrl = new URL('https://id.kick.com/oauth/authorize');
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('client_id', KICK_CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', KICK_REDIRECT_URI);
-  authUrl.searchParams.set('scope', 'user:read channel:read chat:write events:subscribe');
+  authUrl.searchParams.set('scope', requestedScope);
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('state', state);
