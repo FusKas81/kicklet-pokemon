@@ -550,21 +550,41 @@ app.get('/spawn', checkSecret, async (req, res) => {
   }
 });
 
+// Diagnostic link: Visit https://kicklet-pokemon.onrender.com/debug-kick?secret=mysecret99
+app.get('/debug-kick', checkSecret, async (req, res) => {
+  try {
+    const db = await getDB();
+    const hasToken = Boolean(db.kickAuth?.access_token);
+    if (!hasToken) {
+      return res.send('❌ No Kick token saved yet! Visit /kick-login?secret=mysecret99 first.');
+    }
+    const token = await getKickAccessToken(db);
+    await subscribeKickChatWebhook(token);
+    await sendKickChat(db, '🤖 Pokémon Bot is connected and ready! Type !help for commands.');
+    res.send('✅ Token valid, webhook re-subscribed, and test message sent to your Kick chat!');
+  } catch (err) {
+    res.send('❌ Debug error: ' + JSON.stringify(err.response?.data || err.message));
+  }
+});
+
 // Direct Kick Webhook Receiver (Listens to Kick chat messages)
 app.post('/kick-webhook', async (req, res) => {
-  res.sendStatus(200); // Acknowledge Kick immediately
+  res.sendStatus(200);
   try {
-    const eventType = req.headers['kick-event-type'];
-    if (eventType !== 'chat.message.sent') return;
+    const eventType = (req.headers['kick-event-type'] || req.body?.event_type || '').toLowerCase();
+    console.log('📩 Incoming Kick Webhook:', eventType, JSON.stringify(req.body));
 
-    const payload = req.body;
-    const content = (payload.content || '').trim();
+    if (eventType && eventType !== 'chat.message.sent') return;
+
+    // Kick sends fields either at root or inside .data / .payload
+    const msgObj = req.body?.data || req.body?.payload || req.body;
+    const content = (msgObj?.content || '').trim();
     if (!content.startsWith('!')) return;
 
-    const sender = payload.sender?.username || payload.sender?.slug;
-    const badges = payload.sender?.identity?.badges || [];
+    const sender = msgObj?.sender?.username || msgObj?.sender?.slug;
+    const badges = msgObj?.sender?.identity?.badges || [];
     const isMod = badges.some(b => b.type === 'moderator' || b.type === 'broadcaster') ||
-                  String(payload.sender?.user_id) === String(process.env.KICK_BROADCASTER_ID);
+                  String(msgObj?.sender?.user_id || msgObj?.sender?.id) === String(process.env.KICK_BROADCASTER_ID);
 
     const parts = content.slice(1).split(/\s+/);
     const cmd = parts[0];
