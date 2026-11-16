@@ -41,7 +41,7 @@ async function saveDB(doc) {
 }
 
 const POKEAPI = 'https://pokeapi.co/api/v2';
-const MAX_POKEMON_ID = 1025;
+const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
 const MAX_INVENTORY = 10;
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 
@@ -245,6 +245,10 @@ async function generatePokemon(idOrName, forceShiny = null) {
   };
 }
 
+function speciesIdFromUrl(url) {
+  return parseInt(url.split('/').filter(Boolean).pop(), 10);
+}
+
 async function checkEvolution(db, user) {
   const inv = db.users[user].inventory;
   const counts = {};
@@ -265,8 +269,14 @@ async function checkEvolution(db, user) {
       let nextSpecies = null;
       function findNext(node) {
         if (node.species.name.toUpperCase() === pokeName && node.evolves_to.length > 0) {
-          const branch = node.evolves_to[Math.floor(Math.random() * node.evolves_to.length)];
-          nextSpecies = branch.species.name;
+          // Only allow evolutions that are still Generation 1
+          const validBranches = node.evolves_to.filter(
+            b => speciesIdFromUrl(b.species.url) <= MAX_POKEMON_ID
+          );
+          if (validBranches.length > 0) {
+            const branch = validBranches[Math.floor(Math.random() * validBranches.length)];
+            nextSpecies = branch.species.name;
+          }
           return;
         }
         node.evolves_to.forEach(findNext);
