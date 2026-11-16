@@ -22,6 +22,8 @@ const defaultState = {
   users: {},
   pokedex: {},
   currentSpawn: null,
+  lastCaught: null,
+  lastEvolution: null,
   activeBattle: null,
   kickAuth: null,
   oauthPkce: {}
@@ -133,6 +135,7 @@ async function fetchPokemonData(idOrName, forceShiny = null) {
   const spDef = Math.floor(((2 * (statsMap['special-defense'] || 60)) * level) / 100) + 5;
   const spd = Math.floor(((2 * (statsMap.speed || 60)) * level) / 100) + 5;
 
+  // Pick up to 4 real damaging moves with official power & accuracy
   const candidateMoves = data.moves
     .map(m => m.move)
     .sort(() => 0.5 - Math.random())
@@ -435,6 +438,14 @@ async function processCommand(sender, rawText) {
       shinyFound: Boolean((db.pokedex[mon.id] && db.pokedex[mon.id].shinyFound) || mon.isShiny)
     };
 
+    db.lastCaught = {
+      name: mon.name,
+      id: mon.id,
+      isShiny: mon.isShiny,
+      types: mon.types,
+      caughtBy: sender,
+      caughtAt: Date.now()
+    };
     db.currentSpawn = null;
 
     let reply = `🎉 @${sender} caught ${mon.isShiny ? '✨ SHINY ' : ''}${mon.name}! (${user.party.length}/10 slots)`;
@@ -451,6 +462,7 @@ async function processCommand(sender, rawText) {
         const anyShiny = sameIndices.slice(0, 3).some(idx => user.party[idx].isShiny);
         const evolvedMon = await fetchPokemonData(nextEvoName, anyShiny);
 
+        // Remove the 3 base copies (highest index first) and add evolved Pokémon
         const toRemove = sameIndices.slice(0, 3).sort((a, b) => b - a);
         for (const idx of toRemove) {
           user.party.splice(idx, 1);
@@ -462,6 +474,17 @@ async function processCommand(sender, rawText) {
           name: evolvedMon.name,
           firstCaughtBy: db.pokedex[evolvedMon.id] ? db.pokedex[evolvedMon.id].firstCaughtBy : sender,
           shinyFound: Boolean((db.pokedex[evolvedMon.id] && db.pokedex[evolvedMon.id].shinyFound) || evolvedMon.isShiny)
+        };
+
+        db.lastEvolution = {
+          fromName: mon.name,
+          fromId: mon.id,
+          toName: evolvedMon.name,
+          toId: evolvedMon.id,
+          isShiny: evolvedMon.isShiny,
+          types: evolvedMon.types,
+          trainer: sender,
+          evolvedAt: Date.now()
         };
 
         reply += ` ✨ WHAT?! Three ${mon.name} combined and evolved into ${evolvedMon.isShiny ? '✨ SHINY ' : ''}${evolvedMon.name}!`;
@@ -657,6 +680,7 @@ app.post('/kick-webhook', async (req, res) => {
     const sender = senderObj.username || senderObj.slug || 'Trainer';
     const broadcasterId = (payload.broadcaster && payload.broadcaster.user_id) || null;
 
+    // Ignore bot's own announcements to prevent loops
     if (!content || !content.startsWith('!')) return;
 
     const reply = await processCommand(sender, content);
@@ -673,7 +697,9 @@ app.get('/battle-data', async (req, res) => {
   res.json({
     active: Boolean(db.activeBattle),
     battle: db.activeBattle || null,
-    spawn: db.currentSpawn || null
+    spawn: db.currentSpawn || null,
+    lastCaught: db.lastCaught || null,
+    lastEvolution: db.lastEvolution || null
   });
 });
 
@@ -691,6 +717,7 @@ app.get('/overlay', (req, res) => {
 
     #gbc-frame {
       display: none;
+      position: relative;
       width: 680px;
       height: 520px;
       background: #f8fafc;
@@ -722,9 +749,26 @@ app.get('/overlay', (req, res) => {
     .hud-user { font-size: 9px; color: #475569; margin-bottom: 8px; }
     .hp-bar-bg { width: 100%; height: 12px; background: #cbd5e1; border: 3px solid #181818; border-radius: 4px; overflow: hidden; }
     .hp-bar-fill { height: 100%; background: #22c55e; transition: width 0.4s ease; }
+
+    @keyframes low-hp-pulse {
+      0%, 100% { background-color: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.9); }
+      50% { background-color: #fca5a5; box-shadow: none; }
+    }
+    .hp-bar-fill.low-hp {
+      animation: low-hp-pulse 0.7s steps(2, end) infinite;
+    }
+
     .hp-text { font-size: 9px; text-align: right; margin-top: 5px; }
 
-    .sprite-wrap { position: relative; width: 136px; height: 136px; display: flex; justify-content: center; align-items: center; }
+    .sprite-wrap {
+      position: relative;
+      width: 136px;
+      height: 136px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
     .sprite { width: 136px; height: 136px; image-rendering: pixelated; object-fit: contain; }
 
     @keyframes hit-shake {
@@ -784,6 +828,110 @@ app.get('/overlay', (req, res) => {
       font-size: 10px;
     }
 
+    @keyframes faint-drop {
+      0% { transform: translateY(0); opacity: 1; }
+      100% { transform: translateY(110px); opacity: 0; }
+    }
+    .faint-anim { animation: faint-drop 0.65s steps(6, end) forwards; }
+
+    @keyframes banner-pop {
+      0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+      60% { transform: translate(-50%, -50%) scale(1.06); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+    #winner-banner {
+      display: none;
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #facc15;
+      color: #181818;
+      border: 4px solid #181818;
+      box-shadow: 0 6px 0 #181818;
+      border-radius: 6px;
+      padding: 12px 18px;
+      font-size: 14px;
+      white-space: nowrap;
+      z-index: 20;
+      text-align: center;
+      animation: banner-pop 0.35s steps(5, end) forwards;
+    }
+
+    @keyframes sparkle-burst {
+      0% { transform: translate(0, 0) scale(0.4); opacity: 1; }
+      50% { opacity: 1; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(1.2); opacity: 0; }
+    }
+    .shiny-star {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      color: #facc15;
+      font-size: 16px;
+      line-height: 1;
+      pointer-events: none;
+      z-index: 15;
+      text-shadow: 2px 2px 0 #181818, -1px -1px 0 #fef08a;
+      animation: sparkle-burst 0.85s steps(6, end) forwards;
+    }
+    .shiny-glow {
+      filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.85));
+    }
+
+    @keyframes pokeball-wobble {
+      0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
+      20% { transform: translate(-56%, -50%) rotate(-18deg); }
+      40% { transform: translate(-44%, -50%) rotate(18deg); }
+      60% { transform: translate(-54%, -50%) rotate(-12deg); }
+      80% { transform: translate(-46%, -50%) rotate(12deg); }
+    }
+    @keyframes sprite-absorb {
+      0% { transform: scale(1); filter: brightness(1); opacity: 1; }
+      50% { transform: scale(0.4); filter: brightness(3); opacity: 0.9; }
+      100% { transform: scale(0); filter: brightness(4); opacity: 0; }
+    }
+    .sprite-caught { animation: sprite-absorb 0.35s steps(4, end) forwards; }
+    .pokeball-catch {
+      position: absolute;
+      top: 52%;
+      left: 50%;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 4px solid #181818;
+      background: linear-gradient(to bottom, #ef4444 0%, #ef4444 46%, #181818 46%, #181818 54%, #ffffff 54%, #ffffff 100%);
+      box-shadow: 0 4px 0 #181818;
+      z-index: 16;
+      animation: pokeball-wobble 0.95s steps(4, end) 2;
+    }
+    .pokeball-catch::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 12px;
+      height: 12px;
+      transform: translate(-50%, -50%);
+      background: #ffffff;
+      border: 3px solid #181818;
+      border-radius: 50%;
+    }
+
+    @keyframes evo-flash {
+      0% { filter: brightness(1); transform: scale(1); }
+      25% { filter: brightness(6) contrast(0); transform: scale(1.15); }
+      50% { filter: brightness(1); transform: scale(0.95); }
+      75% { filter: brightness(6) contrast(0); transform: scale(1.2); }
+      100% { filter: brightness(1); transform: scale(1); }
+    }
+    .evo-anim { animation: evo-flash 1.1s steps(4, end); }
+    .evo-banner {
+      background: #38bdf8 !important;
+      color: #181818 !important;
+      text-shadow: none !important;
+    }
+
     .dialog-box {
       margin-top: 10px;
       background: #ffffff;
@@ -832,6 +980,7 @@ app.get('/overlay', (req, res) => {
 </head>
 <body>
   <div id="gbc-frame">
+    <div id="winner-banner"></div>
     <div class="arena-top">
       <div class="hud-box">
         <div class="hud-header"><span id="p2-name">OPPONENT</span><span>Lv50</span></div>
@@ -860,13 +1009,14 @@ app.get('/overlay', (req, res) => {
 
   <div id="spawn-card">
     <div id="spawn-banner">WILD POKÉMON APPEARED!</div>
-    <img id="spawn-sprite" class="sprite" src="">
+    <div class="sprite-wrap" id="spawn-wrap" style="margin: 0 auto;"><img id="spawn-sprite" class="sprite" src=""></div>
     <div id="spawn-name">PIKACHU</div>
     <div id="spawn-types">TYPE: ELECTRIC</div>
     <div id="spawn-hint">TYPE !catch IN CHAT!</div>
   </div>
 
   <script>
+    // Adjust overall 8-bit volume here (0.03 = quiet, 0.08 = medium, 0.18 = loud)
     const MASTER_VOLUME = 0.08;
 
     let audioCtx = null;
@@ -896,21 +1046,35 @@ app.get('/overlay', (req, res) => {
     }
 
     function playSpawnSound(isShiny) {
-      playTone(523.25, 0.10, 'square', 0.00);
-      playTone(659.25, 0.10, 'square', 0.10);
-      playTone(783.99, 0.22, 'square', 0.20);
+      playTone(523.25, 0.10, 'square', 0.00); // C5
+      playTone(659.25, 0.10, 'square', 0.10); // E5
+      playTone(783.99, 0.22, 'square', 0.20); // G5
       if (isShiny) {
-        playTone(1046.50, 0.10, 'triangle', 0.36, 1.2);
-        playTone(1318.51, 0.28, 'triangle', 0.46, 1.2);
+        playTone(1046.50, 0.10, 'triangle', 0.36, 1.2); // C6
+        playTone(1318.51, 0.28, 'triangle', 0.46, 1.2); // E6
       }
     }
 
-    function playHitSound() {
+    function playHitSound(effType = 'normal') {
       const ctx = getAudioCtx();
       if (!ctx) return;
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
+
+      if (effType === 'resist') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.15);
+        gain.gain.setValueAtTime(MASTER_VOLUME * 0.9, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+        return;
+      }
+
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(320, now);
       osc.frequency.exponentialRampToValueAtTime(65, now + 0.18);
@@ -920,6 +1084,11 @@ app.get('/overlay', (req, res) => {
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.18);
+
+      if (effType === 'super') {
+        playTone(880.00, 0.08, 'square', 0.02, 1.15); // A5
+        playTone(1318.51, 0.18, 'square', 0.09, 1.25); // E6
+      }
     }
 
     function playMissSound() {
@@ -941,15 +1110,53 @@ app.get('/overlay', (req, res) => {
     }
 
     function playImmuneSound() {
-      playTone(110.0, 0.09, 'sawtooth', 0.00, 1.0);
-      playTone(82.41, 0.16, 'sawtooth', 0.10, 1.0);
+      playTone(110.0, 0.09, 'sawtooth', 0.00, 1.0); // A2
+      playTone(82.41, 0.16, 'sawtooth', 0.10, 1.0); // E2
+    }
+
+    function playLowHpChime() {
+      playTone(783.99, 0.09, 'square', 0.22, 0.65); // G5
+      playTone(523.25, 0.12, 'square', 0.34, 0.65); // C5
+    }
+
+    function playFaintSound() {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(260, now + 0.12);
+      osc.frequency.exponentialRampToValueAtTime(55, now + 0.65);
+      gain.gain.setValueAtTime(MASTER_VOLUME * 1.1, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + 0.12);
+      osc.stop(now + 0.65);
     }
 
     function playVictoryFanfare() {
-      playTone(783.99, 0.11, 'square', 0.00, 1.1);
-      playTone(783.99, 0.11, 'square', 0.13, 1.1);
-      playTone(783.99, 0.11, 'square', 0.26, 1.1);
-      playTone(1046.50, 0.45, 'square', 0.39, 1.2);
+      playTone(783.99, 0.11, 'square', 0.00, 1.1); // G5
+      playTone(783.99, 0.11, 'square', 0.13, 1.1); // G5
+      playTone(783.99, 0.11, 'square', 0.26, 1.1); // G5
+      playTone(1046.50, 0.45, 'square', 0.39, 1.2); // C6
+    }
+
+    function playCatchFanfare() {
+      playTone(587.33, 0.10, 'square', 0.15, 1.05); // D5
+      playTone(739.99, 0.10, 'square', 0.27, 1.05); // F#5
+      playTone(880.00, 0.10, 'square', 0.39, 1.05); // A5
+      playTone(1174.66, 0.42, 'square', 0.51, 1.2); // D6
+    }
+
+    function playEvolutionChime() {
+      playTone(523.25, 0.10, 'square', 0.00, 1.05); // C5
+      playTone(659.25, 0.10, 'square', 0.12, 1.05); // E5
+      playTone(783.99, 0.10, 'square', 0.24, 1.05); // G5
+      playTone(1046.50, 0.14, 'square', 0.36, 1.15); // C6
+      playTone(783.99, 0.10, 'square', 0.52, 1.05); // G5
+      playTone(1046.50, 0.45, 'square', 0.64, 1.25); // C6
     }
 
     function triggerHitEffect(imgEl, wrapEl, dmgAmount, effType = 'normal') {
@@ -977,11 +1184,42 @@ app.get('/overlay', (req, res) => {
       }
     }
 
+    function triggerShinySparkle(wrapEl) {
+      if (!wrapEl) return;
+      const offsets = [
+        { tx: '-48px', ty: '-44px', delay: '0s' },
+        { tx: '46px',  ty: '-40px', delay: '0.1s' },
+        { tx: '-44px', ty: '36px',  delay: '0.18s' },
+        { tx: '48px',  ty: '38px',  delay: '0.25s' },
+        { tx: '0px',   ty: '-54px', delay: '0.12s' }
+      ];
+      offsets.forEach(o => {
+        const star = document.createElement('div');
+        star.className = 'shiny-star';
+        star.textContent = '✦';
+        star.style.setProperty('--tx', o.tx);
+        star.style.setProperty('--ty', o.ty);
+        star.style.animationDelay = o.delay;
+        wrapEl.appendChild(star);
+        setTimeout(() => star.remove(), 1150);
+      });
+    }
+
     let lastSpawnTimestamp = null;
     let lastBattleStateKey = null;
     let battleWasStarted = false;
     let lastP1Hp = null;
     let lastP2Hp = null;
+    let p1LowHpWarned = false;
+    let p2LowHpWarned = false;
+    let lastBattleSnapshot = null;
+    let faintHoldUntil = 0;
+    let p1ShinySparkled = false;
+    let p2ShinySparkled = false;
+    let lastCaughtTimestamp = null;
+    let catchHoldUntil = 0;
+    let lastEvolutionTimestamp = null;
+    let evoHoldUntil = 0;
 
     function setSprite(img, mon, back) {
       if (!mon) return;
@@ -996,6 +1234,7 @@ app.get('/overlay', (req, res) => {
       const pct = Math.max(0, Math.min(100, (cur / max) * 100));
       el.style.width = pct + '%';
       el.style.background = pct > 50 ? '#22c55e' : (pct > 20 ? '#eab308' : '#ef4444');
+      el.classList.toggle('low-hp', pct > 0 && pct <= 20);
     }
 
     async function tick() {
@@ -1009,6 +1248,10 @@ app.get('/overlay', (req, res) => {
           card.style.display = 'none';
           frame.style.display = 'block';
           const b = data.battle;
+          lastBattleSnapshot = b;
+
+          const winBanner = document.getElementById('winner-banner');
+          if (winBanner) winBanner.style.display = 'none';
 
           if (b.p2Mon) battleWasStarted = true;
 
@@ -1016,6 +1259,23 @@ app.get('/overlay', (req, res) => {
           const p2Sprite = document.getElementById('p2-sprite');
           const p1Wrap = document.getElementById('p1-wrap');
           const p2Wrap = document.getElementById('p2-wrap');
+
+          p1Sprite.classList.remove('faint-anim');
+          p2Sprite.classList.remove('faint-anim');
+
+          p1Sprite.classList.toggle('shiny-glow', Boolean(b.p1Mon.isShiny));
+          if (b.p1Mon.isShiny && !p1ShinySparkled) {
+            p1ShinySparkled = true;
+            triggerShinySparkle(p1Wrap);
+          }
+
+          if (b.p2Mon) {
+            p2Sprite.classList.toggle('shiny-glow', Boolean(b.p2Mon.isShiny));
+            if (b.p2Mon.isShiny && !p2ShinySparkled) {
+              p2ShinySparkled = true;
+              triggerShinySparkle(p2Wrap);
+            }
+          }
 
           const logLower = (b.lastLog || '').toLowerCase();
           const effType = logLower.includes('super effective')
@@ -1047,9 +1307,24 @@ app.get('/overlay', (req, res) => {
             } else if (effType === 'immune') {
               playImmuneSound();
             } else {
-              playHitSound();
+              playHitSound(effType);
             }
           }
+
+          const p1Pct = (b.p1Mon.currentHp / b.p1Mon.maxHp) * 100;
+          if (p1Pct > 0 && p1Pct <= 20 && !p1LowHpWarned) {
+            p1LowHpWarned = true;
+            playLowHpChime();
+          }
+
+          if (b.p2Mon) {
+            const p2Pct = (b.p2Mon.currentHp / b.p2Mon.maxHp) * 100;
+            if (p2Pct > 0 && p2Pct <= 20 && !p2LowHpWarned) {
+              p2LowHpWarned = true;
+              playLowHpChime();
+            }
+          }
+
           lastBattleStateKey = stateKey;
 
           document.getElementById('p1-name').textContent = (b.p1Mon.isShiny ? '✨' : '') + b.p1Mon.name;
@@ -1078,26 +1353,143 @@ app.get('/overlay', (req, res) => {
           return;
         }
 
-        if (lastBattleStateKey && battleWasStarted) {
-          playVictoryFanfare();
+        // Battle end faint drop + 2.5s victory hold
+        if (lastBattleStateKey && battleWasStarted && lastBattleSnapshot) {
+          faintHoldUntil = Date.now() + 2500;
+          const b = lastBattleSnapshot;
+          const p1Sprite = document.getElementById('p1-sprite');
+          const p2Sprite = document.getElementById('p2-sprite');
+          const p1Lost = b.turn === b.p1;
+          const winnerName = p1Lost ? b.p2 : b.p1;
+          const winBanner = document.getElementById('winner-banner');
+
+          if (p1Lost) {
+            document.getElementById('p1-hp-text').textContent = '0/' + b.p1Mon.maxHp;
+            setHp(document.getElementById('p1-hp-bar'), 0, b.p1Mon.maxHp);
+            p1Sprite.classList.add('faint-anim');
+          } else if (b.p2Mon) {
+            document.getElementById('p2-hp-text').textContent = '0/' + b.p2Mon.maxHp;
+            setHp(document.getElementById('p2-hp-bar'), 0, b.p2Mon.maxHp);
+            p2Sprite.classList.add('faint-anim');
+          }
+
+          if (winBanner) {
+            winBanner.textContent = '🏆 WINNER: @' + winnerName.toUpperCase() + '!';
+            winBanner.style.display = 'block';
+          }
+          document.getElementById('log-text').textContent = '@' + winnerName + ' won the battle!';
+
+          playFaintSound();
+          setTimeout(() => playVictoryFanfare(), 700);
+          lastBattleStateKey = null;
+          battleWasStarted = false;
+          return;
         }
+
+        if (Date.now() < faintHoldUntil) {
+          return;
+        }
+
         lastBattleStateKey = null;
         battleWasStarted = false;
+        lastBattleSnapshot = null;
         lastP1Hp = null;
         lastP2Hp = null;
+        p1LowHpWarned = false;
+        p2LowHpWarned = false;
+        p1ShinySparkled = false;
+        p2ShinySparkled = false;
         frame.style.display = 'none';
 
         const s = data.spawn;
+        const c = data.lastCaught;
+        const ev = data.lastEvolution;
+        const banner = document.getElementById('spawn-banner');
+        const spawnSprite = document.getElementById('spawn-sprite');
+        const spawnWrap = document.getElementById('spawn-wrap');
+
+        // Poké Ball catch animation
+        if (c && c.caughtAt && (Date.now() - c.caughtAt) < 4500 && lastCaughtTimestamp !== c.caughtAt) {
+          lastCaughtTimestamp = c.caughtAt;
+          catchHoldUntil = Date.now() + 3200;
+          card.style.display = 'block';
+
+          banner.classList.remove('evo-banner');
+          banner.classList.add('shiny');
+          banner.textContent = 'GOTCHA! @' + c.caughtBy.toUpperCase() + '!';
+          setSprite(spawnSprite, c, false);
+          spawnSprite.classList.remove('sprite-caught', 'evo-anim');
+          void spawnSprite.offsetWidth;
+          spawnSprite.classList.add('sprite-caught');
+
+          const oldBall = spawnWrap.querySelector('.pokeball-catch');
+          if (oldBall) oldBall.remove();
+          const ball = document.createElement('div');
+          ball.className = 'pokeball-catch';
+          spawnWrap.appendChild(ball);
+
+          document.getElementById('spawn-name').textContent = (c.isShiny ? '✨' : '') + c.name + ' CAUGHT!';
+          document.getElementById('spawn-types').textContent = 'ADDED TO @' + c.caughtBy.toUpperCase() + '\\'S PARTY';
+
+          playCatchFanfare();
+          setTimeout(() => triggerShinySparkle(spawnWrap), 1850);
+          setTimeout(() => { if (ball.parentNode) ball.remove(); }, 3200);
+          return;
+        }
+
+        if (Date.now() < catchHoldUntil) {
+          return;
+        }
+
+        // 3-of-a-kind Evolution alert card
+        if (ev && ev.evolvedAt && (Date.now() - ev.evolvedAt) < 9000 && lastEvolutionTimestamp !== ev.evolvedAt) {
+          lastEvolutionTimestamp = ev.evolvedAt;
+          evoHoldUntil = Date.now() + 3800;
+          card.style.display = 'block';
+
+          banner.textContent = '✨ WHAT? IT EVOLVED! ✨';
+          banner.classList.remove('shiny');
+          banner.classList.add('evo-banner');
+
+          setSprite(spawnSprite, { id: ev.fromId, isShiny: ev.isShiny }, false);
+          spawnSprite.classList.remove('sprite-caught', 'evo-anim');
+          void spawnSprite.offsetWidth;
+          spawnSprite.classList.add('evo-anim');
+
+          document.getElementById('spawn-name').textContent = ev.fromName + ' ➔ ' + (ev.isShiny ? '✨' : '') + ev.toName + '!';
+          document.getElementById('spawn-types').textContent = '@' + ev.trainer.toUpperCase() + ' EVOLVED 3-OF-A-KIND!';
+
+          playEvolutionChime();
+          setTimeout(() => {
+            setSprite(spawnSprite, { id: ev.toId, isShiny: ev.isShiny }, false);
+            spawnSprite.classList.toggle('shiny-glow', Boolean(ev.isShiny));
+            triggerShinySparkle(spawnWrap);
+          }, 550);
+          return;
+        }
+
+        if (Date.now() < evoHoldUntil) {
+          return;
+        }
+        banner.classList.remove('evo-banner');
+
+        // Wild Pokémon spawn card
         if (s && s.spawnedAt && (Date.now() - s.spawnedAt) < 20000) {
           card.style.display = 'block';
+          spawnSprite.classList.remove('sprite-caught', 'evo-anim');
+          const oldBall = spawnWrap.querySelector('.pokeball-catch');
+          if (oldBall) oldBall.remove();
+
+          spawnSprite.classList.toggle('shiny-glow', Boolean(s.isShiny));
           if (lastSpawnTimestamp !== s.spawnedAt) {
             lastSpawnTimestamp = s.spawnedAt;
             playSpawnSound(Boolean(s.isShiny));
+            if (s.isShiny) triggerShinySparkle(spawnWrap);
           }
-          const banner = document.getElementById('spawn-banner');
+
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
           banner.classList.toggle('shiny', Boolean(s.isShiny));
-          setSprite(document.getElementById('spawn-sprite'), s, false);
+          setSprite(spawnSprite, s, false);
           document.getElementById('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
           document.getElementById('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
         } else {
