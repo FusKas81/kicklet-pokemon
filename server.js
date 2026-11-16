@@ -1,17 +1,17 @@
 import express from 'express';
 import axios from 'axios';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 
 const app = express();
 app.use(express.json());
 
-// Connect to MongoDB safely with clear error logging
 if (!process.env.MONGO_URI) {
-  console.error('❌ ERROR: MONGO_URI environment variable is missing in Render!');
+  console.error('❌ ERROR: MONGO_URI is missing in Render!');
 } else {
   mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('✅ Connected to MongoDB successfully!'))
-    .catch(err => console.error('❌ MongoDB Connection Error:', err.message));
+    .then(() => console.log('✅ Connected to MongoDB!'))
+    .catch(err => console.error('❌ MongoDB Error:', err.message));
 }
 
 const StateSchema = new mongoose.Schema({
@@ -19,7 +19,8 @@ const StateSchema = new mongoose.Schema({
   users: { type: Object, default: {} },
   activeSpawn: { type: Object, default: null },
   pendingTrades: { type: Object, default: {} },
-  activeBattles: { type: Object, default: {} }
+  activeBattles: { type: Object, default: {} },
+  kickAuth: { type: Object, default: null }
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
@@ -35,12 +36,17 @@ async function saveDB(doc) {
   doc.markModified('activeSpawn');
   doc.markModified('pendingTrades');
   doc.markModified('activeBattles');
+  doc.markModified('kickAuth');
   await doc.save();
 }
 
 const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 1025;
 const MAX_INVENTORY = 10;
+const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
+
+// Store temporary PKCE verifier in memory during login
+let tempPkceVerifier = null;
 
 function checkSecret(req, res, next) {
   if (process.env.BOT_SECRET && req.query.secret !== process.env.BOT_SECRET) {
@@ -49,6 +55,122 @@ function checkSecret(req, res, next) {
   next();
 }
 
+// --- KICK OFFICIAL API & PKCE OAUTH HELPERS ---
+async function getKickAccessToken(db) {
+  if (!db.kickAuth || !db.kickAuth.refresh_token) return null;
+
+  if (Date.now() > (db.kickAuth.expires_at - 120000)) {
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: process.env.KICK_CLIENT_ID,
+      client_secret: process.env.KICK_CLIENT_SECRET,
+      refresh_token: db.kickAuth.refresh_token
+    });
+    const { data } = await axios.post('https://id.kick.com/oauth/token', params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+    db.kickAuth = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: Date.now() + data.expires_in * 1000
+    };
+    await saveDB(db);
+  }
+  return db.kickAuth.access_token;
+}
+
+async function sendKickChat(db, content) {
+  try {
+    const token = await getKickAccessToken(db);
+    if (!token || !process.env.KICK_BROADCASTER_ID) return;
+
+    await axios.post(
+      'https://api.kick.com/public/v1/chat',
+      {
+        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
+        content: content.slice(0, 500),
+        type: 'bot'
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (err) {
+    console.error('❌ Kick Chat Error:', err.response?.data || err.message);
+  }
+}
+
+async function subscribeKickChatWebhook(token) {
+  try {
+    await axios.post(
+      'https://api.kick.com/public/v1/events/subscriptions',
+      {
+        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
+        events: [{ name: 'chat.message.sent', version: 1 }],
+        method: 'webhook'
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    console.log('✅ Subscribed to Kick chat.message.sent webhook!');
+  } catch (err) {
+    console.error('⚠️ Webhook subscription notice:', err.response?.data || err.message);
+  }
+}
+
+// Step A: Visit /kick-login?secret=mysecret99 once to authorize
+app.get('/kick-login', checkSecret, (req, res) => {
+  tempPkceVerifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(tempPkceVerifier).digest('base64url');
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const authUrl =
+    `https://id.kick.com/oauth/authorize?response_type=code` +
+    `&client_id=${process.env.KICK_CLIENT_ID}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent('chat:write user:read events:subscribe')}` +
+    `&code_challenge=${challenge}` +
+    `&code_challenge_method=S256` +
+    `&state=${state}`;
+
+  res.redirect(authUrl);
+});
+
+// Step B: Kick redirects back here with the authorization code
+app.get('/kick-callback', async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code || !tempPkceVerifier) {
+      return res.send('❌ Missing code or session expired. Open /kick-login?secret=mysecret99 again.');
+    }
+
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: process.env.KICK_CLIENT_ID,
+      client_secret: process.env.KICK_CLIENT_SECRET,
+      redirect_uri: REDIRECT_URI,
+      code_verifier: tempPkceVerifier,
+      code
+    });
+
+    const { data } = await axios.post('https://id.kick.com/oauth/token', params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
+    const db = await getDB();
+    db.kickAuth = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: Date.now() + data.expires_in * 1000
+    };
+    await saveDB(db);
+    await subscribeKickChatWebhook(data.access_token);
+
+    res.send('✅ Kick connected! Your Pokémon bot is now listening to chat and posting directly.');
+  } catch (err) {
+    console.error('❌ OAuth Callback Error:', err.response?.data || err.message);
+    res.send('❌ Kick login failed: ' + JSON.stringify(err.response?.data || err.message));
+  }
+});
+
+// --- POKÉMON GAME LOGIC ---
 const TYPE_CHART = {
   normal: { rock: 0.5, ghost: 0, steel: 0.5 },
   fire: { fire: 0.5, water: 0.5, grass: 2, ice: 2, bug: 2, rock: 0.5, dragon: 0.5, steel: 2 },
@@ -175,313 +297,291 @@ async function checkEvolution(db, user) {
   }
   return null;
 }
-async function getKickAccessToken(db) {
-  if (!db.kickAuth || !db.kickAuth.refresh_token) return null;
 
-  // Refresh token if expired or expiring within 2 minutes
-  if (Date.now() > (db.kickAuth.expires_at - 120000)) {
-    const params = new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: process.env.KICK_CLIENT_ID,
-      client_secret: process.env.KICK_CLIENT_SECRET,
-      refresh_token: db.kickAuth.refresh_token
-    });
-    const { data } = await axios.post('https://id.kick.com/oauth/token', params);
-    db.kickAuth = {
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      expires_at: Date.now() + data.expires_in * 1000
-    };
-    docMarkAndSaveKick(db);
-  }
-  return db.kickAuth.access_token;
+async function triggerSpawn(db) {
+  const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
+  const mon = await generatePokemon(randomId);
+  db.activeSpawn = { ...mon, caughtBy: [], spawnedAt: Date.now() };
+  await saveDB(db);
+
+  const shinyTag = mon.isShiny ? '✨SHINY ' : '';
+  return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`;
 }
 
-async function docMarkAndSaveKick(db) {
-  db.markModified('kickAuth');
-  await db.save();
+async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
+  const user = (rawUser || '').toLowerCase().replace('@', '');
+  const cmd = (rawCmd || '').toLowerCase();
+  const args = (rawArgs || '').trim().split(/\s+/).filter(Boolean);
+
+  if (!user) return null;
+  if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
+  if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
+  if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
+
+  if (cmd === 'spawn') {
+    if (!isMod) return `@${user} Only moderators can use !spawn.`;
+    return await triggerSpawn(db);
+  }
+
+  if (cmd === 'catch') {
+    const spawn = db.activeSpawn;
+    if (!spawn) return `@${user} No wild Pokémon right now!`;
+    if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}!`;
+    if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (10/10)! Use !release <1-10>.`;
+    if (Math.random() > 0.65) return `@${user} The wild ${spawn.name} broke free!`;
+
+    const caughtMon = await generatePokemon(spawn.id, spawn.isShiny);
+    db.users[user].inventory.push(caughtMon);
+    db.users[user].totalCaught += 1;
+    if (!db.users[user].pokedex.includes(caughtMon.id)) db.users[user].pokedex.push(caughtMon.id);
+    spawn.caughtBy.push(user);
+    await saveDB(db);
+
+    const shinyTag = caughtMon.isShiny ? '✨SHINY ' : '';
+    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/10)`;
+    const evoMsg = await checkEvolution(db, user);
+    if (evoMsg) reply += ` | ${evoMsg}`;
+    return reply;
+  }
+
+  if (cmd === 'spawncheck' || cmd === 'wild') {
+    const spawn = db.activeSpawn;
+    if (!spawn) return `@${user} No wild Pokémon right now!`;
+    spawn.spawnedAt = Date.now();
+    await saveDB(db);
+    const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
+    const status = spawn.caughtBy.includes(user) ? 'Already caught!' : 'Type !catch to throw a Pokéball!';
+    return `🌿 Active Spawn: ${shinyTag}${spawn.name} (${spawn.types.join('/').toUpperCase()}) — ${status}`;
+  }
+
+  if (cmd === 'party') {
+    const inv = db.users[user].inventory;
+    if (inv.length === 0) return `@${user} Your party is empty!`;
+    const list = inv.map((p, i) => `[${i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
+    return `@${user}'s Party (${inv.length}/10): ${list}`;
+  }
+
+  if (cmd === 'info') {
+    const slot = parseInt(args[0]) - 1;
+    const mon = db.users[user].inventory[slot];
+    if (!mon) return `@${user} Use !info <1-10>.`;
+    const shinyTag = mon.isShiny ? '✨SHINY ' : '';
+    const movesStr = mon.moves.map((m, i) => `${i + 1}:${m.name}(${m.type}/${m.power}pwr)`).join(', ');
+    return `@${user} #${slot + 1} ${shinyTag}${mon.name} | HP:${mon.maxHp} | Moves: ${movesStr}`;
+  }
+
+  if (cmd === 'release') {
+    const slot = parseInt(args[0]) - 1;
+    const inv = db.users[user].inventory;
+    if (!inv[slot]) return `@${user} Use !release <1-10>.`;
+    const released = inv.splice(slot, 1)[0];
+    await saveDB(db);
+    return `@${user} Released ${released.name}.`;
+  }
+
+  if (cmd === 'pokedex') {
+    const uniqueCount = db.users[user].pokedex.length;
+    const totalCaught = db.users[user].totalCaught;
+    const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
+    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught}`;
+  }
+
+  if (cmd === 'leaderboard') {
+    const rankings = Object.entries(db.users)
+      .map(([name, data]) => ({ name, caught: data.totalCaught ?? data.inventory.length }))
+      .filter(entry => entry.caught > 0)
+      .sort((a, b) => b.caught - a.caught)
+      .slice(0, 5);
+
+    if (rankings.length === 0) return '🏆 Nobody has caught any Pokémon yet! Be the first with !catch!';
+    const board = rankings.map((entry, idx) => `#${idx + 1} @${entry.name} (${entry.caught})`).join(' | ');
+    return `🏆 Top Pokémon Trainers: ${board}`;
+  }
+
+  if (cmd === 'trade') {
+    const target = (args[0] || '').toLowerCase().replace('@', '');
+    const slot = parseInt(args[1]) - 1;
+    const mon = db.users[user].inventory[slot];
+    if (!target || !db.users[target]) return `@${user} User not found.`;
+    if (target === user) return `@${user} Can't trade with yourself!`;
+    if (!mon) return `@${user} Usage: !trade @user <slot>`;
+
+    db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
+    await saveDB(db);
+    return `🔄 @${user} wants to trade ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! Type !accept <yourSlot> to accept.`;
+  }
+
+  if (cmd === 'accept') {
+    const trade = db.pendingTrades[user];
+    if (!trade) return `@${user} No pending trades.`;
+    const mySlot = parseInt(args[0]) - 1;
+    const myInv = db.users[user].inventory;
+    const senderInv = db.users[trade.fromUser].inventory;
+    const myMon = myInv[mySlot];
+    const senderIndex = senderInv.findIndex(p => p.uid === trade.offeredUid);
+
+    if (!myMon || senderIndex === -1) {
+      delete db.pendingTrades[user];
+      await saveDB(db);
+      return `@${user} Trade failed.`;
+    }
+
+    const senderMon = senderInv[senderIndex];
+    senderInv[senderIndex] = myMon;
+    myInv[mySlot] = senderMon;
+    delete db.pendingTrades[user];
+
+    if (!db.users[user].pokedex.includes(senderMon.id)) db.users[user].pokedex.push(senderMon.id);
+    if (!db.users[trade.fromUser].pokedex) db.users[trade.fromUser].pokedex = [];
+    if (!db.users[trade.fromUser].pokedex.includes(myMon.id)) db.users[trade.fromUser].pokedex.push(myMon.id);
+
+    await saveDB(db);
+
+    let reply = `🤝 Trade done! @${trade.fromUser} got ${myMon.name} & @${user} got ${senderMon.name}!`;
+    const evo1 = await checkEvolution(db, user);
+    const evo2 = await checkEvolution(db, trade.fromUser);
+    if (evo1) reply += ` | ${evo1}`;
+    if (evo2) reply += ` | ${evo2}`;
+    return reply;
+  }
+
+  if (cmd === 'battle') {
+    const opponent = (args[0] || '').toLowerCase().replace('@', '');
+    const slot = parseInt(args[1]) - 1;
+    const myMon = db.users[user].inventory[slot];
+    if (!opponent || !db.users[opponent]) return `@${user} Opponent not found.`;
+    if (!myMon) return `@${user} Usage: !battle @user <slot>`;
+
+    const battleKey = [user, opponent].sort().join('_vs_');
+    let battle = db.activeBattles[battleKey];
+
+    if (!battle) {
+      db.activeBattles[battleKey] = {
+        p1: user,
+        p2: opponent,
+        p1Mon: { ...myMon, currentHp: myMon.maxHp },
+        p2Mon: null,
+        turn: user,
+        lastLog: `@${user} challenged @${opponent}!`
+      };
+      await saveDB(db);
+      return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, type !battle @${user} <slot> to accept!`;
+    } else if (battle.p2 === user && !battle.p2Mon) {
+      battle.p2Mon = { ...myMon, currentHp: myMon.maxHp };
+      battle.lastLog = `What will ${battle.p1Mon.name} do?`;
+      await saveDB(db);
+      return `🔥 Battle started! ${battle.p1Mon.name} vs ${battle.p2Mon.name}! @${battle.turn}, use !move <1-4>!`;
+    }
+    return `@${user} Battle already active! Use !move <1-4>.`;
+  }
+
+  if (cmd === 'move') {
+    const moveIdx = parseInt(args[0]) - 1;
+    const battleKey = Object.keys(db.activeBattles).find(k => k.includes(user));
+    const battle = db.activeBattles[battleKey];
+    if (!battle || !battle.p2Mon) return `@${user} Not in a battle.`;
+    if (battle.turn !== user) return `@${user} Not your turn!`;
+
+    const isP1 = battle.p1 === user;
+    const attacker = isP1 ? battle.p1Mon : battle.p2Mon;
+    const defender = isP1 ? battle.p2Mon : battle.p1Mon;
+    const opponentUser = isP1 ? battle.p2 : battle.p1;
+    const move = attacker.moves[moveIdx];
+    if (!move) return `@${user} Pick move 1-4.`;
+
+    if (Math.random() * 100 > move.accuracy) {
+      battle.turn = opponentUser;
+      battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}... missed!`;
+      await saveDB(db);
+      return `💨 ${attacker.name} used ${move.name}, but missed! @${opponentUser}'s turn.`;
+    }
+
+    const stab = attacker.types.includes(move.type) ? 1.5 : 1.0;
+    const effectiveness = getTypeEffectiveness(move.type, defender.types);
+    const rawDamage = (((2 * 50 / 5 + 2) * move.power * (attacker.atk / defender.def)) / 50 + 2);
+    const finalDamage = Math.max(1, Math.floor(rawDamage * stab * effectiveness * (0.85 + Math.random() * 0.15)));
+    defender.currentHp = Math.max(0, defender.currentHp - finalDamage);
+
+    let effText = effectiveness > 1 ? ' Super effective!' : (effectiveness === 0 ? ' No effect!' : (effectiveness < 1 ? ' Not very effective...' : ''));
+
+    if (defender.currentHp === 0) {
+      delete db.activeBattles[battleKey];
+      await saveDB(db);
+      return `💥 ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} fainted! 🏆 @${user} wins!`;
+    }
+
+    battle.turn = opponentUser;
+    battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}!${effText}`;
+    await saveDB(db);
+    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). @${opponentUser}'s turn!`;
+  }
+
+  if (cmd === 'forfeit') {
+    const battleKey = Object.keys(db.activeBattles).find(k => k.split('_vs_').includes(user));
+    if (!battleKey) return `@${user} Not in a battle.`;
+    const battle = db.activeBattles[battleKey];
+    const opponent = battle.p1 === user ? battle.p2 : battle.p1;
+    const wasAccepted = Boolean(battle.p2Mon);
+    delete db.activeBattles[battleKey];
+    await saveDB(db);
+    return wasAccepted ? `🏳️ @${user} forfeited! 🏆 @${opponent} wins!` : `🏳️ @${user} canceled the challenge.`;
+  }
+
+  if (cmd === 'help' || cmd === 'pokemon') {
+    return '🎮 Commands: !catch | !spawncheck | !party | !info <1-10> | !release <1-10> | !pokedex | !leaderboard | !trade @user <slot> & !accept <slot> | !battle @user <slot>, !move <1-4>, !forfeit';
+  }
+
+  return null;
 }
 
-async function sendKickChatMessage(db, content) {
-  try {
-    const token = await getKickAccessToken(db);
-    if (!token || !process.env.KICK_BROADCASTER_ID) return;
-
-    await axios.post(
-      'https://api.kick.com/public/v1/chat',
-      {
-        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
-        content,
-        type: 'bot'
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-  } catch (err) {
-    console.error('❌ Kick Chat Post Error:', err.response?.data || err.message);
-  }
-}
-
-// One-time login route to authorize Kick chat posting
-app.get('/kick-login', checkSecret, (req, res) => {
-  const redirectUri = 'https://kicklet-pokemon.onrender.com/kick-callback';
-  const authUrl = `https://id.kick.com/oauth/authorize?response_type=code&client_id=${process.env.KICK_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=chat:write+user:read&code_challenge=plain_challenge_123&code_challenge_method=plain`;
-  res.redirect(authUrl);
-});
-
-app.get('/kick-callback', async (req, res) => {
-  try {
-    const code = req.query.code;
-    const params = new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: process.env.KICK_CLIENT_ID,
-      client_secret: process.env.KICK_CLIENT_SECRET,
-      redirect_uri: 'https://kicklet-pokemon.onrender.com/kick-callback',
-      code_verifier: 'plain_challenge_123',
-      code
-    });
-    const { data } = await axios.post('https://id.kick.com/oauth/token', params);
-    const db = await getDB();
-    db.kickAuth = {
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      expires_at: Date.now() + data.expires_in * 1000
-    };
-    await docMarkAndSaveKick(db);
-    res.send('✅ Kick Chat connected! Your 15-minute spawns will now post automatically in chat.');
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.send('❌ Kick authorization failed. Check Render logs.');
-  }
-});
+// --- ROUTES ---
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
+// Triggered every 15 mins by cron-job.org (posts directly to Kick chat + OBS)
 app.get('/spawn', checkSecret, async (req, res) => {
   try {
     const db = await getDB();
-    const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
-    const mon = await generatePokemon(randomId);
-    db.activeSpawn = { ...mon, caughtBy: [], spawnedAt: Date.now() };
-    await saveDB(db);
-
-    const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-    res.send(`🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`);
+    const msg = await triggerSpawn(db);
+    await sendKickChat(db, msg);
+    res.send(msg);
   } catch (err) {
     console.error(err);
-    res.send('⚠️ Spawn error - check Render logs.');
+    res.send('⚠️ Spawn error.');
   }
 });
 
-app.get('/command', checkSecret, async (req, res) => {
+// Direct Kick Webhook Receiver (Listens to Kick chat messages)
+app.post('/kick-webhook', async (req, res) => {
+  res.sendStatus(200); // Acknowledge Kick immediately
   try {
+    const eventType = req.headers['kick-event-type'];
+    if (eventType !== 'chat.message.sent') return;
+
+    const payload = req.body;
+    const content = (payload.content || '').trim();
+    if (!content.startsWith('!')) return;
+
+    const sender = payload.sender?.username || payload.sender?.slug;
+    const badges = payload.sender?.identity?.badges || [];
+    const isMod = badges.some(b => b.type === 'moderator' || b.type === 'broadcaster') ||
+                  String(payload.sender?.user_id) === String(process.env.KICK_BROADCASTER_ID);
+
+    const parts = content.slice(1).split(/\s+/);
+    const cmd = parts[0];
+    const args = parts.slice(1).join(' ');
+
+    const validCmds = ['spawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon'];
+    if (!validCmds.includes(cmd.toLowerCase())) return;
+
     const db = await getDB();
-    const user = (req.query.user || '').toLowerCase().replace('@', '');
-    const cmd = (req.query.cmd || '').toLowerCase();
-    const args = (req.query.args || '').trim().split(/\s+/).filter(Boolean);
-
-    if (!user) return res.send('Missing user.');
-    if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
-    if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
-    if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
-
-    if (cmd === 'catch') {
-      const spawn = db.activeSpawn;
-      if (!spawn) return res.send(`@${user} No wild Pokémon right now!`);
-      if (spawn.caughtBy.includes(user)) return res.send(`@${user} You already caught this ${spawn.name}!`);
-      if (db.users[user].inventory.length >= MAX_INVENTORY) return res.send(`@${user} Party full (10/10)! Use !release <1-10>.`);
-      if (Math.random() > 0.65) return res.send(`@${user} The wild ${spawn.name} broke free!`);
-
-      const caughtMon = await generatePokemon(spawn.id, spawn.isShiny);
-      db.users[user].inventory.push(caughtMon);
-      db.users[user].totalCaught += 1;
-      if (!db.users[user].pokedex.includes(caughtMon.id)) db.users[user].pokedex.push(caughtMon.id);
-      spawn.caughtBy.push(user);
-      await saveDB(db);
-
-      const shinyTag = caughtMon.isShiny ? '✨SHINY ' : '';
-      let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/10)`;
-      const evoMsg = await checkEvolution(db, user);
-      if (evoMsg) reply += ` | ${evoMsg}`;
-      return res.send(reply);
-    }
-
-    if (cmd === 'party') {
-      const inv = db.users[user].inventory;
-      if (inv.length === 0) return res.send(`@${user} Your party is empty!`);
-      const list = inv.map((p, i) => `[${i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
-      return res.send(`@${user}'s Party (${inv.length}/10): ${list}`);
-    }
-
-    if (cmd === 'info') {
-      const slot = parseInt(args[0]) - 1;
-      const mon = db.users[user].inventory[slot];
-      if (!mon) return res.send(`@${user} Use !info <1-10>.`);
-      const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-      const movesStr = mon.moves.map((m, i) => `${i + 1}:${m.name}(${m.type}/${m.power}pwr)`).join(', ');
-      return res.send(`@${user} #${slot + 1} ${shinyTag}${mon.name} | HP:${mon.maxHp} | Moves: ${movesStr}`);
-    }
-
-    if (cmd === 'release') {
-      const slot = parseInt(args[0]) - 1;
-      const inv = db.users[user].inventory;
-      if (!inv[slot]) return res.send(`@${user} Use !release <1-10>.`);
-      const released = inv.splice(slot, 1)[0];
-      await saveDB(db);
-      return res.send(`@${user} Released ${released.name}.`);
-    }
-
-    if (cmd === 'pokedex') {
-      const uniqueCount = db.users[user].pokedex.length;
-      const totalCaught = db.users[user].totalCaught;
-      const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
-      return res.send(`📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught}`);
-    }
-
-    if (cmd === 'leaderboard') {
-      const rankings = Object.entries(db.users)
-        .map(([name, data]) => ({ name, caught: data.totalCaught ?? data.inventory.length }))
-        .filter(entry => entry.caught > 0)
-        .sort((a, b) => b.caught - a.caught)
-        .slice(0, 5);
-
-      if (rankings.length === 0) return res.send('🏆 Nobody has caught any Pokémon yet! Be the first with !catch!');
-      const board = rankings.map((entry, idx) => `#${idx + 1} @${entry.name} (${entry.caught})`).join(' | ');
-      return res.send(`🏆 Top Pokémon Trainers: ${board}`);
-    }
-
-    if (cmd === 'trade') {
-      const target = (args[0] || '').toLowerCase().replace('@', '');
-      const slot = parseInt(args[1]) - 1;
-      const mon = db.users[user].inventory[slot];
-      if (!target || !db.users[target]) return res.send(`@${user} User not found.`);
-      if (target === user) return res.send(`@${user} Can't trade with yourself!`);
-      if (!mon) return res.send(`@${user} Usage: !trade @user <slot>`);
-
-      db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
-      await saveDB(db);
-      return res.send(`🔄 @${user} wants to trade ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! Type !accept <yourSlot> to accept.`);
-    }
-
-    if (cmd === 'accept') {
-      const trade = db.pendingTrades[user];
-      if (!trade) return res.send(`@${user} No pending trades.`);
-      const mySlot = parseInt(args[0]) - 1;
-      const myInv = db.users[user].inventory;
-      const senderInv = db.users[trade.fromUser].inventory;
-      const myMon = myInv[mySlot];
-      const senderIndex = senderInv.findIndex(p => p.uid === trade.offeredUid);
-
-      if (!myMon || senderIndex === -1) {
-        delete db.pendingTrades[user];
-        await saveDB(db);
-        return res.send(`@${user} Trade failed.`);
-      }
-
-      const senderMon = senderInv[senderIndex];
-      senderInv[senderIndex] = myMon;
-      myInv[mySlot] = senderMon;
-      delete db.pendingTrades[user];
-
-      if (!db.users[user].pokedex.includes(senderMon.id)) db.users[user].pokedex.push(senderMon.id);
-      if (!db.users[trade.fromUser].pokedex) db.users[trade.fromUser].pokedex = [];
-      if (!db.users[trade.fromUser].pokedex.includes(myMon.id)) db.users[trade.fromUser].pokedex.push(myMon.id);
-
-      await saveDB(db);
-
-      let reply = `🤝 Trade done! @${trade.fromUser} got ${myMon.name} & @${user} got ${senderMon.name}!`;
-      const evo1 = await checkEvolution(db, user);
-      const evo2 = await checkEvolution(db, trade.fromUser);
-      if (evo1) reply += ` | ${evo1}`;
-      if (evo2) reply += ` | ${evo2}`;
-      return res.send(reply);
-    }
-
-    if (cmd === 'battle') {
-      const opponent = (args[0] || '').toLowerCase().replace('@', '');
-      const slot = parseInt(args[1]) - 1;
-      const myMon = db.users[user].inventory[slot];
-      if (!opponent || !db.users[opponent]) return res.send(`@${user} Opponent not found.`);
-      if (!myMon) return res.send(`@${user} Usage: !battle @user <slot>`);
-
-      const battleKey = [user, opponent].sort().join('_vs_');
-      let battle = db.activeBattles[battleKey];
-
-      if (!battle) {
-        db.activeBattles[battleKey] = { p1: user, p2: opponent, p1Mon: { ...myMon, currentHp: myMon.maxHp }, p2Mon: null, turn: user };
-        await saveDB(db);
-        return res.send(`⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, type !battle @${user} <slot> to accept!`);
-      } else if (battle.p2 === user && !battle.p2Mon) {
-        battle.p2Mon = { ...myMon, currentHp: myMon.maxHp };
-        await saveDB(db);
-        return res.send(`🔥 Battle started! ${battle.p1Mon.name} vs ${battle.p2Mon.name}! @${battle.turn}, use !move <1-4>!`);
-      }
-      return res.send(`@${user} Battle already active! Use !move <1-4>.`);
-    }
-
-    if (cmd === 'move') {
-      const moveIdx = parseInt(args[0]) - 1;
-      const battleKey = Object.keys(db.activeBattles).find(k => k.includes(user));
-      const battle = db.activeBattles[battleKey];
-      if (!battle || !battle.p2Mon) return res.send(`@${user} Not in a battle.`);
-      if (battle.turn !== user) return res.send(`@${user} Not your turn!`);
-
-      const isP1 = battle.p1 === user;
-      const attacker = isP1 ? battle.p1Mon : battle.p2Mon;
-      const defender = isP1 ? battle.p2Mon : battle.p1Mon;
-      const opponentUser = isP1 ? battle.p2 : battle.p1;
-      const move = attacker.moves[moveIdx];
-      if (!move) return res.send(`@${user} Pick move 1-4.`);
-
-      if (Math.random() * 100 > move.accuracy) {
-        battle.turn = opponentUser;
-        await saveDB(db);
-        return res.send(`💨 ${attacker.name} used ${move.name}, but missed! @${opponentUser}'s turn.`);
-      }
-
-      const stab = attacker.types.includes(move.type) ? 1.5 : 1.0;
-      const effectiveness = getTypeEffectiveness(move.type, defender.types);
-      const rawDamage = (((2 * 50 / 5 + 2) * move.power * (attacker.atk / defender.def)) / 50 + 2);
-      const finalDamage = Math.max(1, Math.floor(rawDamage * stab * effectiveness * (0.85 + Math.random() * 0.15)));
-      defender.currentHp = Math.max(0, defender.currentHp - finalDamage);
-
-      let effText = effectiveness > 1 ? " Super effective!" : (effectiveness === 0 ? " No effect!" : (effectiveness < 1 ? " Not very effective..." : ""));
-
-      if (defender.currentHp === 0) {
-        delete db.activeBattles[battleKey];
-        await saveDB(db);
-        return res.send(`💥 ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} fainted! 🏆 @${user} wins!`);
-      }
-
-      battle.turn = opponentUser;
-      await saveDB(db);
-      return res.send(`⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). @${opponentUser}'s turn!`);
-    }
-if (cmd === 'forfeit') {
-      const battleKey = Object.keys(db.activeBattles).find(k => k.split('_vs_').includes(user));
-      if (!battleKey) return res.send(`@${user} You are not in an active battle.`);
-
-      const battle = db.activeBattles[battleKey];
-      const opponent = battle.p1 === user ? battle.p2 : battle.p1;
-      const wasAccepted = Boolean(battle.p2Mon);
-
-      delete db.activeBattles[battleKey];
-      await saveDB(db);
-
-      if (!wasAccepted) {
-        return res.send(`🏳️ @${user} canceled the battle challenge with @${opponent}.`);
-      }
-      return res.send(`🏳️ @${user} forfeited the battle! 🏆 @${opponent} wins by default!`);
-    }    
-if (cmd === 'help' || cmd === 'pokemon') {
-      return res.send(
-        '🎮 Pokémon Commands: !catch (catch spawn) | !party (view 1-10) | !info <1-10> (moves/HP) | !release <1-10> | !pokedex | !leaderboard | !trade @user <slot> & !accept <slot> | !battle @user <slot> & !move <1-4> (3 of a kind auto-evolves!)'
-      );
-    }    
-    return res.send('Unknown command.');
+    const reply = await processCommand(db, sender, cmd, args, isMod);
+    if (reply) await sendKickChat(db, reply);
   } catch (err) {
-    console.error(err);
-    return res.send('⚠️ PokéCenter hiccup, try again!');
+    console.error('❌ Webhook processing error:', err.message);
   }
 });
+
+// Live JSON data for OBS Overlay
 app.get('/battle-data', async (req, res) => {
   try {
     const db = await getDB();
@@ -620,7 +720,7 @@ app.get('/overlay', (req, res) => {
             document.getElementById('p2-sprite').style.visibility = 'hidden';
           }
           const activeMon = (b.turn === b.p2 && b.p2Mon) ? b.p2Mon : b.p1Mon;
-          document.getElementById('log-text').textContent = '@' + b.turn + '\\'s turn (!move 1-4)';
+          document.getElementById('log-text').textContent = (b.lastLog || '') + ' (@' + b.turn + '\\'s turn: !move 1-4)';
           document.getElementById('moves-grid').innerHTML = activeMon.moves.map((m, i) => '<div class="move-item">!' + (i + 1) + ' ' + m.name.toUpperCase() + '</div>').join('');
           return;
         }
@@ -646,5 +746,6 @@ app.get('/overlay', (req, res) => {
 </body>
 </html>`);
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
