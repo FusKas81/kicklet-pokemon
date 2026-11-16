@@ -308,6 +308,46 @@ async function checkEvolution(db, user) {
   return null;
 }
 
+// --- BATTLE COMMENTATOR ---
+function pickLine(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function battleCommentary({ attacker, defender, damage = 0, effectiveness = 1, missed = false, fainted = false }) {
+  if (missed) {
+    return pickLine([
+      `${defender.name} dodged it with ease!`,
+      `What a whiff! ${attacker.name} hits nothing but air!`,
+      `So close, yet so far!`
+    ]);
+  }
+  if (fainted) {
+    return pickLine([
+      `And that's the match! What a finish!`,
+      `Down goes ${defender.name}! Incredible battle, chat!`,
+      `${defender.name} gave it everything, but it's over!`
+    ]);
+  }
+
+  const hpPct = defender.currentHp / defender.maxHp;
+  const bigHit = damage >= defender.maxHp * 0.35;
+
+  if (hpPct <= 0.2) {
+    return pickLine([
+      `${defender.name} is hanging by a thread!`,
+      `${defender.name} is almost out, one more hit could end it!`,
+      `Danger zone! ${defender.name} is barely standing!`
+    ]);
+  }
+  if (effectiveness === 0) return `It doesn't affect ${defender.name} at all... awkward!`;
+  if (effectiveness > 1 && bigHit) return `A devastating, super effective blow! ${defender.name} is shaken!`;
+  if (effectiveness > 1) return pickLine([`Right on the weakness, smart pick!`, `${attacker.name} found the weak spot!`]);
+  if (bigHit) return pickLine([`That one really hurt!`, `Massive damage, chat, did you see that?!`]);
+  if (effectiveness < 1) return pickLine([`${defender.name} shrugs it off.`, `Barely a scratch, that was a poor matchup.`]);
+  if (hpPct <= 0.5) return `${defender.name} is below half health, the pressure is on!`;
+  return pickLine([`Solid hit!`, `The battle is heating up!`, `Neither side is backing down!`]);
+}
+
 async function triggerSpawn(db) {
   const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
   const mon = await generatePokemon(randomId);
@@ -381,9 +421,13 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'release') {
-    const slot = parseInt(args[0]) - 1;
     const inv = db.users[user].inventory;
-    if (!inv[slot]) return `@${user} Use !release <1-10>.`;
+    if (inv.length === 0) return `@${user} Your party is empty, nothing to release!`;
+    const slot = parseInt(args[0]) - 1;
+    if (args.length === 0 || Number.isNaN(slot)) {
+      return `@${user} To release a Pokémon, type !release <slot number>, e.g. !release 3 releases the Pokémon in slot 3. Type !party to see your slots (1-${inv.length}).`;
+    }
+    if (!inv[slot]) return `@${user} You have no Pokémon in slot ${slot + 1}. Pick a slot from 1-${inv.length} (check !party), e.g. !release 1.`;
     const released = inv.splice(slot, 1)[0];
     await saveDB(db);
     return `@${user} Released ${released.name}.`;
@@ -459,8 +503,11 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     const opponent = (args[0] || '').toLowerCase().replace('@', '');
     const slot = parseInt(args[1]) - 1;
     const myMon = db.users[user].inventory[slot];
-    if (!opponent || !db.users[opponent]) return `@${user} Opponent not found.`;
-    if (!myMon) return `@${user} Usage: !battle @user <slot>`;
+    if (args.length === 0) {
+      return `@${user} To battle another trainer, type !battle @username <slot>, e.g. !battle @ash 1 challenges @ash with the Pokémon in your slot 1. Type !party to see your slots. Your opponent accepts with !battle @${user} <slot>, then take turns with !move <1-4>. Use !forfeit to quit.`;
+    }
+    if (!opponent || !db.users[opponent]) return `@${user} Opponent not found. Use !battle @username <slot>, e.g. !battle @ash 1.`;
+    if (Number.isNaN(slot) || !myMon) return `@${user} Pick one of your Pokémon: !battle @${opponent} <slot>, e.g. !battle @${opponent} 1. Type !party to see your slots.`;
 
     const battleKey = [user, opponent].sort().join('_vs_');
     let battle = db.activeBattles[battleKey];
@@ -472,15 +519,19 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
         p1Mon: { ...myMon, currentHp: myMon.maxHp },
         p2Mon: null,
         turn: user,
-        lastLog: `@${user} challenged @${opponent}!`
+        lastLog: `@${user} challenged @${opponent}!`,
+        lastActionAt: Date.now(),
+        nudged: false
       };
       await saveDB(db);
       return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, type !battle @${user} <slot> to accept!`;
     } else if (battle.p2 === user && !battle.p2Mon) {
       battle.p2Mon = { ...myMon, currentHp: myMon.maxHp };
       battle.lastLog = `What will ${battle.p1Mon.name} do?`;
+      battle.lastActionAt = Date.now();
+      battle.nudged = false;
       await saveDB(db);
-      return `🔥 Battle started! ${battle.p1Mon.name} vs ${battle.p2Mon.name}! @${battle.turn}, use !move <1-4>!`;
+      return `🔥 Battle started! ${battle.p1Mon.name} (@${battle.p1}) vs ${battle.p2Mon.name} (@${battle.p2})! 🎙️ Two trainers, one winner, let's go! @${battle.turn}, you move first, use !move <1-4>!`;
     }
     return `@${user} Battle already active! Use !move <1-4>.`;
   }
@@ -502,8 +553,11 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     if (Math.random() * 100 > move.accuracy) {
       battle.turn = opponentUser;
       battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}... missed!`;
+      battle.lastActionAt = Date.now();
+      battle.nudged = false;
       await saveDB(db);
-      return `💨 ${attacker.name} used ${move.name}, but missed! @${opponentUser}'s turn.`;
+      const missComment = battleCommentary({ attacker, defender, missed: true });
+      return `💨 ${attacker.name} used ${move.name}, but missed! 🎙️ ${missComment} @${opponentUser}'s turn.`;
     }
 
     const stab = attacker.types.includes(move.type) ? 1.5 : 1.0;
@@ -517,13 +571,17 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     if (defender.currentHp === 0) {
       delete db.activeBattles[battleKey];
       await saveDB(db);
-      return `💥 ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} fainted! 🏆 @${user} wins!`;
+      const koComment = battleCommentary({ attacker, defender, damage: finalDamage, effectiveness, fainted: true });
+      return `💥 ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} fainted! 🏆 @${user} wins! 🎙️ ${koComment}`;
     }
 
     battle.turn = opponentUser;
     battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}!${effText}`;
+    battle.lastActionAt = Date.now();
+    battle.nudged = false;
     await saveDB(db);
-    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). @${opponentUser}'s turn!`;
+    const comment = battleCommentary({ attacker, defender, damage: finalDamage, effectiveness });
+    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). 🎙️ ${comment} @${opponentUser}'s turn!`;
   }
 
   if (cmd === 'forfeit') {
@@ -756,6 +814,35 @@ app.get('/overlay', (req, res) => {
 </body>
 </html>`);
 });
+
+// Battle commentator: nudges players who are slow to act during a battle
+setInterval(async () => {
+  try {
+    if (mongoose.connection.readyState !== 1) return;
+    const db = await getDB();
+    let changed = false;
+
+    for (const battle of Object.values(db.activeBattles || {})) {
+      if (battle.nudged || !battle.lastActionAt) continue;
+      const idleMs = Date.now() - battle.lastActionAt;
+
+      if (battle.p2Mon && idleMs > 90000) {
+        battle.nudged = true;
+        changed = true;
+        await saveDB(db);
+        await sendKickChat(db, `🎙️ The crowd is waiting... @${battle.turn}, it's your turn! Use !move <1-4> to attack, or !forfeit to give up.`);
+      } else if (!battle.p2Mon && idleMs > 120000) {
+        battle.nudged = true;
+        changed = true;
+        await saveDB(db);
+        await sendKickChat(db, `🎙️ @${battle.p2}, @${battle.p1} is still waiting for you! Type !battle @${battle.p1} <slot> to accept the challenge!`);
+      }
+    }
+    if (changed) await saveDB(db);
+  } catch (err) {
+    console.error('❌ Battle commentator error:', err.message);
+  }
+}, 30000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
