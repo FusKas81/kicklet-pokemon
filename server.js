@@ -308,6 +308,53 @@ async function checkEvolution(db, user) {
   return null;
 }
 
+// --- BATTLE TIMERS ---
+const BATTLE_LIMIT_MS = 5 * 60 * 1000; // max battle length (and max wait for a challenge to be accepted)
+const MOVE_LIMIT_MS = 20 * 1000;       // time each player has to use !move
+const BATTLE_RULES = '📜 Rules: a battle lasts max 5 min, and you have 20s to !move or your turn is skipped!';
+
+// Applies time limits to one battle. Mutates db and returns a chat message, or null if nothing happened.
+function applyBattleTimers(db, key, battle) {
+  const now = Date.now();
+
+  // Challenge that nobody accepted
+  if (!battle.p2Mon) {
+    if (!battle.createdAt) battle.createdAt = now;
+    if (now - battle.createdAt > BATTLE_LIMIT_MS) {
+      delete db.activeBattles[key];
+      return `⏰ @${battle.p2} didn't accept in time, so @${battle.p1}'s challenge has expired.`;
+    }
+    return null;
+  }
+
+  if (!battle.startedAt) battle.startedAt = now;
+  if (!battle.turnStartedAt) battle.turnStartedAt = now;
+
+  // 5 minute battle limit: higher remaining HP% wins
+  if (now - battle.startedAt > BATTLE_LIMIT_MS) {
+    delete db.activeBattles[key];
+    const p1Pct = battle.p1Mon.currentHp / battle.p1Mon.maxHp;
+    const p2Pct = battle.p2Mon.currentHp / battle.p2Mon.maxHp;
+    const p1Txt = `${battle.p1Mon.name} ${Math.round(p1Pct * 100)}%`;
+    const p2Txt = `${battle.p2Mon.name} ${Math.round(p2Pct * 100)}%`;
+    if (p1Pct === p2Pct) return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). It's a draw between @${battle.p1} and @${battle.p2}!`;
+    const winner = p1Pct > p2Pct ? battle.p1 : battle.p2;
+    return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} wins on remaining HP!`;
+  }
+
+  // 20 second move limit: skip the turn
+  if (now - battle.turnStartedAt > MOVE_LIMIT_MS) {
+    const late = battle.turn;
+    const next = late === battle.p1 ? battle.p2 : battle.p1;
+    battle.turn = next;
+    battle.turnStartedAt = now;
+    battle.lastLog = `@${late} ran out of time!`;
+    return `⏰ @${late}, time has passed (20s)! Your turn is skipped. @${next}, it's your turn, use !move <1-4> within 20 seconds!`;
+  }
+
+  return null;
+}
+
 // --- BATTLE COMMENTATOR ---
 function pickLine(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -520,18 +567,19 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
         p2Mon: null,
         turn: user,
         lastLog: `@${user} challenged @${opponent}!`,
-        lastActionAt: Date.now(),
-        nudged: false
+        createdAt: Date.now(),
+        startedAt: null,
+        turnStartedAt: null
       };
       await saveDB(db);
-      return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, type !battle @${user} <slot> to accept!`;
+      return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, type !battle @${user} <slot> within 5 min to accept! ${BATTLE_RULES}`;
     } else if (battle.p2 === user && !battle.p2Mon) {
       battle.p2Mon = { ...myMon, currentHp: myMon.maxHp };
       battle.lastLog = `What will ${battle.p1Mon.name} do?`;
-      battle.lastActionAt = Date.now();
-      battle.nudged = false;
+      battle.startedAt = Date.now();
+      battle.turnStartedAt = Date.now();
       await saveDB(db);
-      return `🔥 Battle started! ${battle.p1Mon.name} (@${battle.p1}) vs ${battle.p2Mon.name} (@${battle.p2})! 🎙️ Two trainers, one winner, let's go! @${battle.turn}, you move first, use !move <1-4>!`;
+      return `🔥 Battle started! ${battle.p1Mon.name} (@${battle.p1}) vs ${battle.p2Mon.name} (@${battle.p2})! ${BATTLE_RULES} @${battle.turn}, you move first, use !move <1-4>!`;
     }
     return `@${user} Battle already active! Use !move <1-4>.`;
   }
@@ -541,6 +589,13 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     const battleKey = Object.keys(db.activeBattles).find(k => k.includes(user));
     const battle = db.activeBattles[battleKey];
     if (!battle || !battle.p2Mon) return `@${user} Not in a battle.`;
+
+    // Enforce time limits even if the background check hasn't caught up yet
+    const timerMsg = applyBattleTimers(db, battleKey, battle);
+    if (timerMsg) {
+      await saveDB(db);
+      return timerMsg;
+    }
     if (battle.turn !== user) return `@${user} Not your turn!`;
 
     const isP1 = battle.p1 === user;
@@ -548,16 +603,21 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     const defender = isP1 ? battle.p2Mon : battle.p1Mon;
     const opponentUser = isP1 ? battle.p2 : battle.p1;
     const move = attacker.moves[moveIdx];
-    if (!move) return `@${user} Pick move 1-4.`;
+    if (args.length === 0 || Number.isNaN(moveIdx) || !move) {
+      const movesList = attacker.moves.map((m, i) => `${i + 1}:${m.name}`).join(', ');
+      const prefix = args.length === 0
+        ? `To attack, type !move <number>, e.g. !move 1 uses move 1.`
+        : `"${args[0]}" isn't a valid move. Type !move <number>, e.g. !move 1.`;
+      return `@${user} ${prefix} Your ${attacker.name}'s moves: ${movesList}. You have 20s per turn!`;
+    }
 
     if (Math.random() * 100 > move.accuracy) {
       battle.turn = opponentUser;
       battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}... missed!`;
-      battle.lastActionAt = Date.now();
-      battle.nudged = false;
+      battle.turnStartedAt = Date.now();
       await saveDB(db);
       const missComment = battleCommentary({ attacker, defender, missed: true });
-      return `💨 ${attacker.name} used ${move.name}, but missed! 🎙️ ${missComment} @${opponentUser}'s turn.`;
+      return `💨 ${attacker.name} used ${move.name}, but missed! 🎙️ ${missComment} @${opponentUser}'s turn (20s)!`;
     }
 
     const stab = attacker.types.includes(move.type) ? 1.5 : 1.0;
@@ -577,11 +637,10 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 
     battle.turn = opponentUser;
     battle.lastLog = `${attacker.name} used ${move.name.toUpperCase()}!${effText}`;
-    battle.lastActionAt = Date.now();
-    battle.nudged = false;
+    battle.turnStartedAt = Date.now();
     await saveDB(db);
     const comment = battleCommentary({ attacker, defender, damage: finalDamage, effectiveness });
-    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). 🎙️ ${comment} @${opponentUser}'s turn!`;
+    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). 🎙️ ${comment} @${opponentUser}'s turn (20s)!`;
   }
 
   if (cmd === 'forfeit') {
@@ -683,7 +742,8 @@ app.get('/overlay', (req, res) => {
     .spawn-banner { background: #181818; color: #fff; font-size: 10px; padding: 6px; border-radius: 4px; margin-bottom: 10px; }
     .spawn-banner.shiny { background: #d97706; }
     .sprite { width: 136px; height: 136px; image-rendering: pixelated; object-fit: contain; }
-    #spawn-name { font-size: 15px; margin: 8px 0; }
+    #spawn-sprite { width: 160px; height: 160px; }
+    #spawn-name { font-size: 18px; margin: 10px 0 8px; letter-spacing: 1px; }
     #spawn-types { font-size: 10px; color: #555; margin-bottom: 12px; }
     .spawn-cta { border-top: 3px dashed #999; padding-top: 10px; font-size: 11px; color: #16a34a; }
     .row { display: flex; justify-content: space-between; align-items: center; }
@@ -698,7 +758,8 @@ app.get('/overlay', (req, res) => {
     #dialog-box { margin-top: 10px; border: 4px solid #181818; border-radius: 6px; padding: 12px; background: #fff; min-height: 112px; }
     #log-text { font-size: 11px; line-height: 1.6; margin-bottom: 10px; }
     #moves-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 2px dashed #999; padding-top: 8px; }
-    .move-item { font-size: 10px; }
+    .move-item { font-size: 10px; display: flex; align-items: center; gap: 8px; }
+    .move-num { display: inline-block; min-width: 22px; text-align: center; background: #181818; color: #fff; border-radius: 3px; padding: 4px 5px; font-size: 10px; }
     .brand { text-align: center; margin-top: 12px; font-size: 13px; letter-spacing: 2px; color: #8d99ae; }
     .brand span:nth-child(1) { color: #ef4444; } .brand span:nth-child(2) { color: #a855f7; } .brand span:nth-child(3) { color: #22c55e; } .brand span:nth-child(4) { color: #eab308; } .brand span:nth-child(5) { color: #3b82f6; }
   </style>
@@ -752,6 +813,17 @@ app.get('/overlay', (req, res) => {
       img.onerror = () => { if (img.src !== front) img.src = front; };
       img.src = back ? rear : front;
     }
+    // Animated (Gen 5 style) sprite for spawns, falls back to the static image if no GIF exists
+    function setAnimatedSprite(img, mon) {
+      const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+      const staticUrl = base + (mon.isShiny ? '/shiny/' : '/') + mon.id + '.png';
+      const gifUrl = base + '/versions/generation-v/black-white/animated/' + (mon.isShiny ? 'shiny/' : '') + mon.id + '.gif';
+      const key = gifUrl + '|' + mon.spawnedAt;
+      if (img.dataset.key === key) return; // don't restart the animation on every poll
+      img.dataset.key = key;
+      img.onerror = () => { img.onerror = null; img.src = staticUrl; };
+      img.src = gifUrl;
+    }
     function setHp(el, cur, max) {
       const pct = Math.max(0, Math.min(100, (cur / max) * 100));
       el.style.width = pct + '%';
@@ -789,18 +861,18 @@ app.get('/overlay', (req, res) => {
           }
           const activeMon = (b.turn === b.p2 && b.p2Mon) ? b.p2Mon : b.p1Mon;
           document.getElementById('log-text').textContent = (b.lastLog || '') + ' (@' + b.turn + '\\'s turn: !move 1-4)';
-          document.getElementById('moves-grid').innerHTML = activeMon.moves.map((m, i) => '<div class="move-item">!' + (i + 1) + ' ' + m.name.toUpperCase() + '</div>').join('');
+          document.getElementById('moves-grid').innerHTML = activeMon.moves.map((m, i) => '<div class="move-item"><span class="move-num">' + (i + 1) + '</span><span>' + m.name.toUpperCase() + '</span></div>').join('');
           return;
         }
 
         frame.style.display = 'none';
         const s = data.spawn;
-        if (s && s.spawnedAt && (Date.now() - s.spawnedAt) < 20000) {
+        if (s && s.spawnedAt && (Date.now() - s.spawnedAt) < 10000) {
           card.style.display = 'block';
           const banner = document.getElementById('spawn-banner');
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
           banner.classList.toggle('shiny', Boolean(s.isShiny));
-          setSprite(document.getElementById('spawn-sprite'), s, false);
+          setAnimatedSprite(document.getElementById('spawn-sprite'), s);
           document.getElementById('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
           document.getElementById('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
         } else {
@@ -815,34 +887,31 @@ app.get('/overlay', (req, res) => {
 </html>`);
 });
 
-// Battle commentator: nudges players who are slow to act during a battle
+// Battle timer: enforces the 20s move limit and 5 min battle limit
+let battleTickRunning = false;
 setInterval(async () => {
+  if (battleTickRunning) return;
+  battleTickRunning = true;
   try {
     if (mongoose.connection.readyState !== 1) return;
     const db = await getDB();
-    let changed = false;
+    const messages = [];
 
-    for (const battle of Object.values(db.activeBattles || {})) {
-      if (battle.nudged || !battle.lastActionAt) continue;
-      const idleMs = Date.now() - battle.lastActionAt;
-
-      if (battle.p2Mon && idleMs > 90000) {
-        battle.nudged = true;
-        changed = true;
-        await saveDB(db);
-        await sendKickChat(db, `🎙️ The crowd is waiting... @${battle.turn}, it's your turn! Use !move <1-4> to attack, or !forfeit to give up.`);
-      } else if (!battle.p2Mon && idleMs > 120000) {
-        battle.nudged = true;
-        changed = true;
-        await saveDB(db);
-        await sendKickChat(db, `🎙️ @${battle.p2}, @${battle.p1} is still waiting for you! Type !battle @${battle.p1} <slot> to accept the challenge!`);
-      }
+    for (const key of Object.keys(db.activeBattles || {})) {
+      const msg = applyBattleTimers(db, key, db.activeBattles[key]);
+      if (msg) messages.push(msg);
     }
-    if (changed) await saveDB(db);
+
+    if (messages.length > 0) {
+      await saveDB(db);
+      for (const msg of messages) await sendKickChat(db, msg);
+    }
   } catch (err) {
-    console.error('❌ Battle commentator error:', err.message);
+    console.error('❌ Battle timer error:', err.message);
+  } finally {
+    battleTickRunning = false;
   }
-}, 30000);
+}, 3000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
