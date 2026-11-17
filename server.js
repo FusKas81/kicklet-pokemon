@@ -45,7 +45,7 @@ const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
 const MAX_INVENTORY = 10;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 10; // keep in sync with the cron-job.org schedule (only used in chat messages)
-const CATCH_WINDOW_MS = 20 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
+const CATCH_WINDOW_MS = 60 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
@@ -317,8 +317,9 @@ async function checkEvolution(db, user) {
 
 // --- BATTLE TIMERS ---
 const BATTLE_LIMIT_MS = 5 * 60 * 1000; // max battle length (and max wait for a challenge to be accepted)
-const MOVE_LIMIT_MS = 20 * 1000;       // time each player has to use !move
-const BATTLE_RULES = '📜 Rules: a battle lasts max 5 min, and you have 20s to !move or your turn is skipped!';
+const MOVE_LIMIT_MS = 30 * 1000;       // time each player has to use !move
+const MOVE_LIMIT_SECS = MOVE_LIMIT_MS / 1000;
+const BATTLE_RULES = `📜 Rules: a battle lasts max 5 min, and you have ${MOVE_LIMIT_SECS}s to !move or your turn is skipped!`;
 
 // Applies time limits to one battle. Mutates db and returns a chat message, or null if nothing happened.
 function applyBattleTimers(db, key, battle) {
@@ -356,7 +357,7 @@ function applyBattleTimers(db, key, battle) {
     battle.turn = next;
     battle.turnStartedAt = now;
     battle.lastLog = `@${late} ran out of time!`;
-    return `⏰ @${late}, time has passed (20s)! Your turn is skipped. @${next}, it's your turn, use !move <1-4> within 20 seconds!`;
+    return `⏰ @${late}, time has passed (${MOVE_LIMIT_SECS}s)! Your turn is skipped. @${next}, it's your turn, use !move <1-4> within ${MOVE_LIMIT_SECS} seconds!`;
   }
 
   return null;
@@ -632,7 +633,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
       const prefix = args.length === 0
         ? `To attack, type !move <number>, e.g. !move 1 uses move 1.`
         : `"${args[0]}" isn't a valid move. Type !move <number>, e.g. !move 1.`;
-      return `@${user} ${prefix} Your ${attacker.name}'s moves: ${movesList}. You have 20s per turn!`;
+      return `@${user} ${prefix} Your ${attacker.name}'s moves: ${movesList}. You have ${MOVE_LIMIT_SECS}s per turn!`;
     }
 
     if (Math.random() * 100 > move.accuracy) {
@@ -641,7 +642,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
       battle.turnStartedAt = Date.now();
       await saveDB(db);
       const missComment = battleCommentary({ attacker, defender, missed: true });
-      return `💨 ${attacker.name} used ${move.name}, but missed! 🎙️ ${missComment} @${opponentUser}'s turn (20s)!`;
+      return `💨 ${attacker.name} used ${move.name}, but missed! 🎙️ ${missComment} @${opponentUser}'s turn (${MOVE_LIMIT_SECS}s)!`;
     }
 
     const stab = attacker.types.includes(move.type) ? 1.5 : 1.0;
@@ -664,7 +665,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     battle.turnStartedAt = Date.now();
     await saveDB(db);
     const comment = battleCommentary({ attacker, defender, damage: finalDamage, effectiveness });
-    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). 🎙️ ${comment} @${opponentUser}'s turn (20s)!`;
+    return `⚔️ ${attacker.name} used ${move.name} (-${finalDamage} HP)!${effText} ${defender.name} (${defender.currentHp}/${defender.maxHp} HP). 🎙️ ${comment} @${opponentUser}'s turn (${MOVE_LIMIT_SECS}s)!`;
   }
 
   if (cmd === 'forfeit') {
@@ -891,7 +892,7 @@ app.get('/overlay', (req, res) => {
 
         frame.style.display = 'none';
         const s = data.spawn;
-        if (s && s.spawnedAt && Date.now() < (s.expiresAt || (s.spawnedAt + 20000))) {
+        if (s && s.spawnedAt && Date.now() < (s.expiresAt || (s.spawnedAt + 60000))) {
           card.style.display = 'block';
           const banner = document.getElementById('spawn-banner');
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
@@ -911,7 +912,7 @@ app.get('/overlay', (req, res) => {
 </html>`);
 });
 
-// Battle timer: enforces the 20s move limit and 5 min battle limit
+// Battle timer: enforces the move time limit and 5 min battle limit
 let battleTickRunning = false;
 setInterval(async () => {
   if (battleTickRunning) return;
