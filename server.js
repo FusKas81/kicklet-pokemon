@@ -43,6 +43,13 @@ async function saveDB(doc) {
 const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
 const MAX_INVENTORY = 10;
+const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
+const SPAWN_INTERVAL_MINUTES = 10; // keep in sync with the cron-job.org schedule (only used in chat messages)
+const CATCH_WINDOW_MS = 20 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
+
+function spawnExpiresAt(spawn) {
+  return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
+}
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 
 // Store temporary PKCE verifier in memory during login
@@ -398,11 +405,12 @@ function battleCommentary({ attacker, defender, damage = 0, effectiveness = 1, m
 async function triggerSpawn(db) {
   const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
   const mon = await generatePokemon(randomId);
-  db.activeSpawn = { ...mon, caughtBy: [], spawnedAt: Date.now() };
+  const now = Date.now();
+  db.activeSpawn = { ...mon, caughtBy: [], attempts: {}, spawnedAt: now, expiresAt: now + CATCH_WINDOW_MS };
   await saveDB(db);
 
   const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-  return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch to throw a Pokéball!`;
+  return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch within ${CATCH_WINDOW_MS / 1000} seconds to throw a Pokéball! (${MAX_CATCH_TRIES} tries each)`;
 }
 
 async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
@@ -423,9 +431,23 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   if (cmd === 'catch') {
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
+    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} Too late, the wild ${spawn.name} fled! Wait for the next spawn.`;
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}!`;
     if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (10/10)! Use !release <1-10>.`;
-    if (Math.random() > 0.65) return `@${user} The wild ${spawn.name} broke free!`;
+
+    // Each trainer gets MAX_CATCH_TRIES attempts per spawn
+    if (!spawn.attempts) spawn.attempts = {};
+    const used = spawn.attempts[user] || 0;
+    if (used >= MAX_CATCH_TRIES) return `@${user} You're out of tries for this ${spawn.name}! Wait for the next spawn.`;
+
+    spawn.attempts[user] = used + 1;
+    if (Math.random() > 0.65) {
+      await saveDB(db);
+      const left = MAX_CATCH_TRIES - spawn.attempts[user];
+      return left > 0
+        ? `@${user} The wild ${spawn.name} broke free! You have ${left} ${left === 1 ? 'try' : 'tries'} left (${spawn.attempts[user]}/${MAX_CATCH_TRIES} used).`
+        : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn.`;
+    }
 
     const caughtMon = await generatePokemon(spawn.id, spawn.isShiny);
     db.users[user].inventory.push(caughtMon);
@@ -443,11 +465,13 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 
   if (cmd === 'spawncheck' || cmd === 'wild') {
     const spawn = db.activeSpawn;
-    if (!spawn) return `@${user} No wild Pokémon right now!`;
-    spawn.spawnedAt = Date.now();
-    await saveDB(db);
+    if (!spawn || Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now!`;
+    const secsLeft = Math.max(1, Math.ceil((spawnExpiresAt(spawn) - Date.now()) / 1000));
     const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
-    const status = spawn.caughtBy.includes(user) ? 'Already caught!' : 'Type !catch to throw a Pokéball!';
+    const triesLeft = MAX_CATCH_TRIES - ((spawn.attempts && spawn.attempts[user]) || 0);
+    const status = spawn.caughtBy.includes(user)
+      ? 'Already caught!'
+      : (triesLeft <= 0 ? 'No tries left!' : `Type !catch to throw a Pokéball! (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left, ${secsLeft}s remaining)`);
     return `🌿 Active Spawn: ${shinyTag}${spawn.name} (${spawn.types.join('/').toUpperCase()}) — ${status}`;
   }
 
@@ -664,7 +688,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 // --- ROUTES ---
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
-// Triggered every 15 mins by cron-job.org (posts directly to Kick chat + OBS)
+// Triggered every 10 mins by cron-job.org (posts directly to Kick chat + OBS)
 app.get('/spawn', checkSecret, async (req, res) => {
   try {
     const db = await getDB();
@@ -867,7 +891,7 @@ app.get('/overlay', (req, res) => {
 
         frame.style.display = 'none';
         const s = data.spawn;
-        if (s && s.spawnedAt && (Date.now() - s.spawnedAt) < 10000) {
+        if (s && s.spawnedAt && Date.now() < (s.expiresAt || (s.spawnedAt + 20000))) {
           card.style.display = 'block';
           const banner = document.getElementById('spawn-banner');
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
@@ -902,9 +926,25 @@ setInterval(async () => {
       if (msg) messages.push(msg);
     }
 
+    // Announce when a wild Pokémon flees after the catch window ends
+    const spawn = db.activeSpawn;
+    if (spawn && !spawn.fledAnnounced && Date.now() > spawnExpiresAt(spawn)) {
+      spawn.fledAnnounced = true;
+      const expiredAgo = Date.now() - spawnExpiresAt(spawn);
+      if (expiredAgo < 60000) { // skip stale spawns left over from before a restart
+        const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
+        const catchers = spawn.caughtBy || [];
+        messages.push(catchers.length > 0
+          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${SPAWN_INTERVAL_MINUTES} minutes!`
+          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${SPAWN_INTERVAL_MINUTES} minutes!`);
+      } else {
+        messages.push(null);
+      }
+    }
+
     if (messages.length > 0) {
       await saveDB(db);
-      for (const msg of messages) await sendKickChat(db, msg);
+      for (const msg of messages) if (msg) await sendKickChat(db, msg);
     }
   } catch (err) {
     console.error('❌ Battle timer error:', err.message);
