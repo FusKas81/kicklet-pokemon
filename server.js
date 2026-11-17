@@ -20,7 +20,8 @@ const StateSchema = new mongoose.Schema({
   activeSpawn: { type: Object, default: null },
   pendingTrades: { type: Object, default: {} },
   activeBattles: { type: Object, default: {} },
-  kickAuth: { type: Object, default: null }
+  kickAuth: { type: Object, default: null },
+  lastBattleResult: { type: Object, default: null }
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
@@ -37,6 +38,7 @@ async function saveDB(doc) {
   doc.markModified('pendingTrades');
   doc.markModified('activeBattles');
   doc.markModified('kickAuth');
+  doc.markModified('lastBattleResult');
   await doc.save();
 }
 
@@ -315,6 +317,25 @@ async function checkEvolution(db, user) {
   return null;
 }
 
+// Remember how the last battle ended so the OBS overlay can play the ending animation
+function recordBattleEnd(db, battle, winner, reason, message) {
+  db.lastBattleResult = {
+    at: Date.now(),
+    p1: battle.p1,
+    p2: battle.p2,
+    createdAt: battle.createdAt || 0,
+    startedAt: battle.startedAt || 0,
+    turnStartedAt: battle.turnStartedAt || 0,
+    turn: battle.turn,
+    p1Mon: battle.p1Mon,
+    p2Mon: battle.p2Mon,
+    lastLog: message,
+    winner,
+    reason,
+    message
+  };
+}
+
 // --- BATTLE TIMERS ---
 const BATTLE_LIMIT_MS = 5 * 60 * 1000; // max battle length (and max wait for a challenge to be accepted)
 const MOVE_LIMIT_MS = 30 * 1000;       // time each player has to use !move
@@ -345,8 +366,12 @@ function applyBattleTimers(db, key, battle) {
     const p2Pct = battle.p2Mon.currentHp / battle.p2Mon.maxHp;
     const p1Txt = `${battle.p1Mon.name} ${Math.round(p1Pct * 100)}%`;
     const p2Txt = `${battle.p2Mon.name} ${Math.round(p2Pct * 100)}%`;
-    if (p1Pct === p2Pct) return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). It's a draw between @${battle.p1} and @${battle.p2}!`;
+    if (p1Pct === p2Pct) {
+      recordBattleEnd(db, battle, null, 'time', "Time is up! It is a draw!");
+      return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). It's a draw between @${battle.p1} and @${battle.p2}!`;
+    }
     const winner = p1Pct > p2Pct ? battle.p1 : battle.p2;
+    recordBattleEnd(db, battle, winner, 'time', `Time is up! @${winner} wins on remaining HP!`);
     return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} wins on remaining HP!`;
   }
 
@@ -484,9 +509,14 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'info') {
+    const inv = db.users[user].inventory;
+    if (inv.length === 0) return `@${user} Your party is empty! Catch a Pokémon with !catch first.`;
     const slot = parseInt(args[0]) - 1;
-    const mon = db.users[user].inventory[slot];
-    if (!mon) return `@${user} Use !info <1-10>.`;
+    if (args.length === 0 || Number.isNaN(slot)) {
+      return `@${user} To see a Pokémon's HP and moves, type !info <slot number>, e.g. !info 1 shows the Pokémon in slot 1. Type !party to see your slots (1-${inv.length}).`;
+    }
+    const mon = inv[slot];
+    if (!mon) return `@${user} You have no Pokémon in slot ${slot + 1}. Pick a slot from 1-${inv.length} (check !party), e.g. !info 1.`;
     const shinyTag = mon.isShiny ? '✨SHINY ' : '';
     const movesStr = mon.moves.map((m, i) => `${i + 1}:${m.name}(${m.type}/${m.power}pwr)`).join(', ');
     return `@${user} #${slot + 1} ${shinyTag}${mon.name} | HP:${mon.maxHp} | Moves: ${movesStr}`;
@@ -654,6 +684,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     let effText = effectiveness > 1 ? ' Super effective!' : (effectiveness === 0 ? ' No effect!' : (effectiveness < 1 ? ' Not very effective...' : ''));
 
     if (defender.currentHp === 0) {
+      recordBattleEnd(db, battle, user, 'faint', `${defender.name} fainted! @${user} wins!`);
       delete db.activeBattles[battleKey];
       await saveDB(db);
       const koComment = battleCommentary({ attacker, defender, damage: finalDamage, effectiveness, fainted: true });
@@ -674,6 +705,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     const battle = db.activeBattles[battleKey];
     const opponent = battle.p1 === user ? battle.p2 : battle.p1;
     const wasAccepted = Boolean(battle.p2Mon);
+    if (wasAccepted) recordBattleEnd(db, battle, opponent, 'forfeit', `@${user} forfeited! @${opponent} wins!`);
     delete db.activeBattles[battleKey];
     await saveDB(db);
     return wasAccepted ? `🏳️ @${user} forfeited! 🏆 @${opponent} wins!` : `🏳️ @${user} canceled the challenge.`;
@@ -742,10 +774,13 @@ app.get('/battle-data', async (req, res) => {
     res.json({
       active: Boolean(activeKey),
       battle: activeKey ? db.activeBattles[activeKey] : null,
-      spawn: db.activeSpawn || null
+      spawn: db.activeSpawn || null,
+      result: db.lastBattleResult || null,
+      now: Date.now(),
+      limits: { move: MOVE_LIMIT_MS, battle: BATTLE_LIMIT_MS }
     });
   } catch (e) {
-    res.json({ active: false, battle: null, spawn: null });
+    res.json({ active: false, battle: null, spawn: null, result: null, now: Date.now() });
   }
 });
 
@@ -761,9 +796,8 @@ app.get('/overlay', (req, res) => {
     body { background: transparent; font-family: 'Press Start 2P', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
     #spawn-card, #gbc-frame { display: none; background: #2b2d42; border: 6px solid #1a1b26; border-radius: 16px 16px 40px 16px; padding: 18px 22px 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.8); }
     #spawn-card { width: 440px; }
-    #gbc-frame { width: 680px; }
-    #spawn-screen, #screen { background: #f8f8f8; border: 5px solid #111; border-radius: 6px; padding: 14px; color: #181818; }
-    #spawn-screen { text-align: center; }
+    #gbc-frame { width: 700px; }
+    #spawn-screen { background: #f8f8f8; border: 5px solid #111; border-radius: 6px; padding: 14px; color: #181818; text-align: center; }
     .spawn-banner { background: #181818; color: #fff; font-size: 10px; padding: 6px; border-radius: 4px; margin-bottom: 10px; }
     .spawn-banner.shiny { background: #d97706; }
     .sprite { width: 136px; height: 136px; image-rendering: pixelated; object-fit: contain; }
@@ -771,22 +805,73 @@ app.get('/overlay', (req, res) => {
     #spawn-name { font-size: 18px; margin: 10px 0 8px; letter-spacing: 1px; }
     #spawn-types { font-size: 10px; color: #555; margin-bottom: 12px; }
     .spawn-cta { border-top: 3px dashed #999; padding-top: 10px; font-size: 11px; color: #16a34a; }
-    .row { display: flex; justify-content: space-between; align-items: center; }
-    .hud-box { border: 4px solid #181818; border-radius: 4px; padding: 8px 10px; width: 290px; }
-    .name { font-size: 13px; margin-bottom: 4px; }
-    .trainer { font-size: 9px; color: #555; margin-bottom: 6px; }
-    .hp-wrap { display: flex; align-items: center; gap: 6px; }
-    .hp-label { font-size: 9px; color: #d97706; }
-    .hp-bar-bg { flex: 1; height: 10px; background: #ccc; border: 2px solid #181818; }
-    .hp-bar-fill { height: 100%; background: #22c55e; transition: width 0.4s ease; }
-    .hp-num { font-size: 10px; text-align: right; margin-top: 5px; }
-    #dialog-box { margin-top: 10px; border: 4px solid #181818; border-radius: 6px; padding: 12px; background: #fff; min-height: 112px; }
-    #log-text { font-size: 11px; line-height: 1.6; margin-bottom: 10px; }
-    #moves-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 2px dashed #999; padding-top: 8px; }
-    .move-item { font-size: 10px; display: flex; align-items: center; gap: 8px; }
-    .move-num { display: inline-block; min-width: 22px; text-align: center; background: #181818; color: #fff; border-radius: 3px; padding: 4px 5px; font-size: 10px; }
     .brand { text-align: center; margin-top: 12px; font-size: 13px; letter-spacing: 2px; color: #8d99ae; }
     .brand span:nth-child(1) { color: #ef4444; } .brand span:nth-child(2) { color: #a855f7; } .brand span:nth-child(3) { color: #22c55e; } .brand span:nth-child(4) { color: #eab308; } .brand span:nth-child(5) { color: #3b82f6; }
+
+    /* ---------- BATTLE SCREEN ---------- */
+    #screen { background: #f8f8f8; border: 5px solid #111; border-radius: 6px; color: #181818; overflow: hidden; }
+    #scene { position: relative; height: 300px; overflow: hidden; border-bottom: 4px solid #181818; }
+    .platform { position: absolute; width: 200px; height: 34px; border-radius: 50%; background: radial-gradient(ellipse at center, #cfcfcf 0%, #cfcfcf 60%, rgba(207,207,207,0) 72%); }
+    #p1-platform { left: 20px; bottom: 2px; width: 230px; }
+    #p2-platform { right: 24px; top: 140px; }
+
+    .spr { position: absolute; width: 220px; display: flex; justify-content: center; align-items: flex-end; }
+    #p1-spr { left: 20px; bottom: 16px; height: 190px; }
+    #p2-spr { right: 34px; top: 20px; height: 140px; }
+    .spr-fx, .spr-bob { width: 100%; height: 100%; display: flex; justify-content: center; align-items: flex-end; }
+    .spr-bob { animation: bob 1.6s ease-in-out infinite; }
+    #p2-spr .spr-bob { animation-delay: -0.8s; }
+    .spr img { display: block; image-rendering: pixelated; transform-origin: 50% 100%; }
+
+    .hud { position: absolute; width: 290px; background: #fff; border: 4px solid #181818; border-radius: 8px 8px 8px 22px; padding: 8px 10px 8px; }
+    #p2-hud { left: 12px; top: 14px; }
+    #p1-hud { right: 12px; bottom: 16px; border-radius: 8px 8px 22px 8px; }
+    .hud-name { font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hud-user { font-size: 8px; color: #666; margin-bottom: 7px; }
+    .hp-row { display: flex; align-items: center; gap: 6px; }
+    .hp-tag { background: #181818; color: #f8c030; font-size: 8px; padding: 3px 4px; border-radius: 3px; }
+    .hp-bg { flex: 1; height: 12px; background: #ddd; border: 3px solid #181818; border-radius: 6px; overflow: hidden; }
+    .hp-fill { height: 100%; width: 100%; background: #22c55e; transition: width 0.9s linear, background 0.4s; }
+    .hp-num { font-size: 11px; text-align: right; margin-top: 6px; }
+    .hide { visibility: hidden; }
+
+    #flash { position: absolute; inset: 0; background: #181818; opacity: 0; pointer-events: none; }
+    #banner { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%) scale(0); background: #181818; color: #f8c030; border: 4px solid #f8c030; border-radius: 8px; padding: 16px 22px; font-size: 18px; white-space: nowrap; display: none; }
+    #banner.show { display: block; animation: banner-pop 0.6s cubic-bezier(.2,1.6,.4,1) forwards; }
+
+    #bottom { display: flex; gap: 8px; padding: 8px; background: #f8f8f8; }
+    #dialog-box { flex: 1; border: 4px solid #181818; border-radius: 6px; padding: 10px 12px; background: #fff; min-height: 156px; display: flex; flex-direction: column; justify-content: space-between; }
+    #log-text { font-size: 11px; line-height: 1.7; min-height: 78px; }
+    #turn-line { border-top: 2px dashed #999; padding-top: 8px; }
+    #turn-text { font-size: 9px; margin-bottom: 6px; min-height: 12px; }
+    #timer-bg { height: 8px; background: #ddd; border: 2px solid #181818; border-radius: 4px; overflow: hidden; }
+    #timer-fill { height: 100%; width: 0%; background: #3b82f6; }
+    #moves-box { width: 290px; border: 4px solid #181818; border-radius: 6px; padding: 8px 10px; background: #fff; }
+    #moves-title { font-size: 8px; color: #555; margin-bottom: 8px; min-height: 10px; }
+    .mv { display: flex; align-items: center; gap: 8px; height: 28px; font-size: 10px; }
+    .mv-num { min-width: 22px; text-align: center; background: #181818; color: #fff; border-radius: 3px; padding: 5px 5px; font-size: 10px; }
+    .mv-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mv-info { font-size: 7px; color: #666; }
+    .mv-hint { font-size: 9px; line-height: 1.7; color: #444; }
+
+    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @keyframes lunge-p1 { 0% { transform: translate(0, 0); } 35% { transform: translate(90px, -40px); } 100% { transform: translate(0, 0); } }
+    @keyframes lunge-p2 { 0% { transform: translate(0, 0); } 35% { transform: translate(-90px, 40px); } 100% { transform: translate(0, 0); } }
+    @keyframes hit { 0%, 100% { opacity: 1; transform: translateX(0); } 10% { opacity: 0; } 20% { opacity: 1; transform: translateX(-10px); } 30% { opacity: 0; } 40% { opacity: 1; transform: translateX(10px); } 50% { opacity: 0; } 60% { opacity: 1; transform: translateX(-6px); } 80% { transform: translateX(4px); } }
+    @keyframes faint { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(110px); opacity: 0; } }
+    @keyframes enter-left { 0% { transform: translateX(-340px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
+    @keyframes enter-right { 0% { transform: translateX(340px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
+    @keyframes hud-in { 0% { transform: translateY(-24px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+    @keyframes flash { 0% { opacity: 0.5; } 100% { opacity: 0; } }
+    @keyframes banner-pop { 0% { transform: translate(-50%, -50%) scale(0); } 100% { transform: translate(-50%, -50%) scale(1); } }
+    .lunge-p1 { animation: lunge-p1 0.6s ease-in-out; }
+    .lunge-p2 { animation: lunge-p2 0.6s ease-in-out; }
+    .hit { animation: hit 0.7s linear; }
+    .faint { animation: faint 0.8s ease-in forwards; }
+    .enter-left { animation: enter-left 0.9s ease-out; }
+    .enter-right { animation: enter-right 0.9s ease-out; }
+    .hud-in { animation: hud-in 0.6s ease-out; }
+    .flash { animation: flash 0.3s ease-out; }
   </style>
 </head>
 <body>
@@ -803,112 +888,318 @@ app.get('/overlay', (req, res) => {
 
   <div id="gbc-frame">
     <div id="screen">
-      <div class="row">
-        <div class="hud-box">
-          <div class="name" id="p2-name"></div>
-          <div class="trainer" id="p2-user"></div>
-          <div class="hp-wrap"><span class="hp-label">HP</span><div class="hp-bar-bg"><div class="hp-bar-fill" id="p2-hp-bar"></div></div></div>
+      <div id="scene">
+        <div class="platform" id="p2-platform"></div>
+        <div class="platform" id="p1-platform"></div>
+
+        <div class="spr" id="p2-spr"><div class="spr-fx" id="p2-fx"><div class="spr-bob"><img id="p2-img" src=""></div></div></div>
+        <div class="spr" id="p1-spr"><div class="spr-fx" id="p1-fx"><div class="spr-bob"><img id="p1-img" src=""></div></div></div>
+
+        <div class="hud" id="p2-hud">
+          <div class="hud-name" id="p2-name"></div>
+          <div class="hud-user" id="p2-user"></div>
+          <div class="hp-row"><span class="hp-tag">HP</span><div class="hp-bg"><div class="hp-fill" id="p2-hp-bar"></div></div></div>
           <div class="hp-num" id="p2-hp-text"></div>
         </div>
-        <img id="p2-sprite" class="sprite" src="">
-      </div>
-      <div class="row" style="margin-top: 6px;">
-        <img id="p1-sprite" class="sprite" src="">
-        <div class="hud-box">
-          <div class="name" id="p1-name"></div>
-          <div class="trainer" id="p1-user"></div>
-          <div class="hp-wrap"><span class="hp-label">HP</span><div class="hp-bar-bg"><div class="hp-bar-fill" id="p1-hp-bar"></div></div></div>
+        <div class="hud" id="p1-hud">
+          <div class="hud-name" id="p1-name"></div>
+          <div class="hud-user" id="p1-user"></div>
+          <div class="hp-row"><span class="hp-tag">HP</span><div class="hp-bg"><div class="hp-fill" id="p1-hp-bar"></div></div></div>
           <div class="hp-num" id="p1-hp-text"></div>
         </div>
+
+        <div id="flash"></div>
+        <div id="banner"></div>
       </div>
-      <div id="dialog-box">
-        <div id="log-text"></div>
-        <div id="moves-grid"></div>
+
+      <div id="bottom">
+        <div id="dialog-box">
+          <div id="log-text"></div>
+          <div id="turn-line">
+            <div id="turn-text"></div>
+            <div id="timer-bg"><div id="timer-fill"></div></div>
+          </div>
+        </div>
+        <div id="moves-box">
+          <div id="moves-title"></div>
+          <div id="moves-list"></div>
+        </div>
       </div>
     </div>
     <div class="brand">GAME BOY <span>C</span><span>O</span><span>L</span><span>O</span><span>R</span></div>
   </div>
 
   <script>
-    function setSprite(img, mon, back) {
-      if (!mon) return;
-      const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
-      const front = base + (mon.isShiny ? '/shiny/' : '/') + mon.id + '.png';
-      const rear = base + (mon.isShiny ? '/back/shiny/' : '/back/') + mon.id + '.png';
-      img.onerror = () => { if (img.src !== front) img.src = front; };
-      img.src = back ? rear : front;
+    var BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+    var offset = 0;                 // server clock minus browser clock
+    var limits = { move: 30000, battle: 300000 };
+    var cur = null;                 // what is currently drawn on the battle screen
+    var lastB = null;               // last battle shown (used by the countdown)
+    var showingResult = false;
+
+    function $(id) { return document.getElementById(id); }
+    function serverNow() { return Date.now() + offset; }
+    function esc(s) { return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'); }
+
+    function play(el, cls, ms) {
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
+      if (ms) setTimeout(function () { el.classList.remove(cls); }, ms);
     }
-    // Animated (Gen 5 style) sprite for spawns, falls back to the static image if no GIF exists
+
+    function typeText(el, text) {
+      if (el.getAttribute('data-full') === text) return;
+      el.setAttribute('data-full', text);
+      if (el._t) clearInterval(el._t);
+      var i = 0;
+      el.textContent = '';
+      el._t = setInterval(function () {
+        i++;
+        el.textContent = text.slice(0, i);
+        if (i >= text.length) clearInterval(el._t);
+      }, 28);
+    }
+
+    // ---------- sprites ----------
+    function spriteUrls(mon, back) {
+      var shiny = Boolean(mon.isShiny);
+      return {
+        anim: BASE + '/versions/generation-v/black-white/animated/' + (back ? 'back/' : '') + (shiny ? 'shiny/' : '') + mon.id + '.gif',
+        still: BASE + (back ? '/back' : '') + (shiny ? '/shiny' : '') + '/' + mon.id + '.png'
+      };
+    }
+    function fitSprite(img, maxH) {
+      var h = img.naturalHeight || 64;
+      var s = Math.min(3, maxH / h);
+      img.style.transform = 'scale(' + s + ')';
+    }
+    function setBattleSprite(img, mon, back, maxH) {
+      var u = spriteUrls(mon, back);
+      if (img.getAttribute('data-key') === u.anim) return; // keep the animation running between polls
+      img.setAttribute('data-key', u.anim);
+      img.onload = function () { fitSprite(img, maxH); };
+      img.onerror = function () {
+        img.onerror = null;
+        img.onload = function () { fitSprite(img, maxH * 0.85); };
+        img.src = u.still;
+      };
+      img.src = u.anim;
+    }
     function setAnimatedSprite(img, mon) {
-      const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
-      const staticUrl = base + (mon.isShiny ? '/shiny/' : '/') + mon.id + '.png';
-      const gifUrl = base + '/versions/generation-v/black-white/animated/' + (mon.isShiny ? 'shiny/' : '') + mon.id + '.gif';
-      const key = gifUrl + '|' + mon.spawnedAt;
-      if (img.dataset.key === key) return; // don't restart the animation on every poll
+      var staticUrl = BASE + (mon.isShiny ? '/shiny/' : '/') + mon.id + '.png';
+      var gifUrl = BASE + '/versions/generation-v/black-white/animated/' + (mon.isShiny ? 'shiny/' : '') + mon.id + '.gif';
+      var key = gifUrl + '|' + mon.spawnedAt;
+      if (img.dataset.key === key) return;
       img.dataset.key = key;
-      img.onerror = () => { img.onerror = null; img.src = staticUrl; };
+      img.onerror = function () { img.onerror = null; img.src = staticUrl; };
       img.src = gifUrl;
     }
-    function setHp(el, cur, max) {
-      const pct = Math.max(0, Math.min(100, (cur / max) * 100));
-      el.style.width = pct + '%';
-      el.style.background = pct > 50 ? '#22c55e' : (pct > 20 ? '#eab308' : '#ef4444');
+
+    // ---------- HP ----------
+    function showHpNum(el, hp, max, instant) {
+      var from = el._cur;
+      if (el._timer) clearInterval(el._timer);
+      if (instant || from === undefined || from === hp) {
+        el._cur = hp;
+        el.textContent = hp + ' / ' + max;
+        return;
+      }
+      var start = Date.now();
+      el._timer = setInterval(function () {
+        var t = Math.min(1, (Date.now() - start) / 900);
+        var v = Math.round(from + (hp - from) * t);
+        el._cur = v;
+        el.textContent = v + ' / ' + max;
+        if (t >= 1) { clearInterval(el._timer); el._cur = hp; }
+      }, 40);
     }
+    function setHp(prefix, hp, max, instant) {
+      var pct = Math.max(0, Math.min(100, (hp / max) * 100));
+      var bar = $(prefix + '-hp-bar');
+      if (instant) bar.style.transition = 'none';
+      bar.style.width = pct + '%';
+      bar.style.background = pct > 50 ? '#22c55e' : (pct > 20 ? '#eab308' : '#ef4444');
+      if (instant) { void bar.offsetWidth; bar.style.transition = ''; }
+      showHpNum($(prefix + '-hp-text'), hp, max, instant);
+    }
+
+    // ---------- attack animation ----------
+    function attackAnim(att, def) {
+      play($(att + '-fx'), 'lunge-' + att, 650);
+      setTimeout(function () {
+        play($(def + '-fx'), 'hit', 750);
+        play($('flash'), 'flash', 350);
+      }, 260);
+    }
+
+    // ---------- moves menu + timers ----------
+    function renderMoves(b, isResult) {
+      var title = $('moves-title');
+      var list = $('moves-list');
+      if (isResult) { title.textContent = 'BATTLE OVER'; list.innerHTML = ''; return; }
+      if (!b.p2Mon) {
+        title.textContent = 'WAITING...';
+        list.innerHTML = '<div class="mv-hint">@' + esc(b.p2) + ' type<br>!battle @' + esc(b.p1) + ' &lt;slot&gt;<br>to accept!</div>';
+        return;
+      }
+      var mon = (b.turn === b.p2) ? b.p2Mon : b.p1Mon;
+      title.textContent = '@' + b.turn + ' - type !move <number>';
+      list.innerHTML = mon.moves.map(function (m, i) {
+        return '<div class="mv"><span class="mv-num">' + (i + 1) + '</span><span class="mv-name">' + esc(m.name.toUpperCase()) + '</span><span class="mv-info">' + esc(m.type.slice(0, 4).toUpperCase()) + ' ' + esc(m.power) + '</span></div>';
+      }).join('');
+    }
+
+    function renderTimer() {
+      var txt = $('turn-text');
+      var fill = $('timer-fill');
+      if (!lastB || !lastB.p2Mon || showingResult) { txt.textContent = ''; fill.style.width = '0%'; return; }
+      var started = lastB.turnStartedAt || serverNow();
+      var left = Math.max(0, started + limits.move - serverNow());
+      var secs = Math.ceil(left / 1000);
+      var battleLeft = Math.max(0, (lastB.startedAt || serverNow()) + limits.battle - serverNow());
+      var m = Math.floor(battleLeft / 60000);
+      var s = Math.floor((battleLeft % 60000) / 1000);
+      txt.textContent = '@' + lastB.turn + ' ' + secs + 's | ' + m + ':' + (s < 10 ? '0' : '') + s + ' left';
+      fill.style.width = (left / limits.move * 100) + '%';
+      fill.style.background = secs <= 8 ? '#ef4444' : '#3b82f6';
+    }
+
+    // ---------- main battle render ----------
+    function battleKey(b) { return b.p1 + '|' + b.p2 + '|' + (b.createdAt || 0); }
+
+    function renderBattle(b, isResult, res) {
+      var key = battleKey(b);
+      var isNew = !cur || cur.key !== key;
+      var hasP2 = Boolean(b.p2Mon);
+      var p1Hp = b.p1Mon.currentHp;
+      var p2Hp = hasP2 ? b.p2Mon.currentHp : null;
+
+      var hit = null;
+      var missed = false;
+      if (!isNew) {
+        if (hasP2 && cur.p2Hp !== null && p2Hp < cur.p2Hp) hit = ['p1', 'p2'];
+        else if (p1Hp < cur.p1Hp) hit = ['p2', 'p1'];
+        else if (b.lastLog !== cur.log && String(b.lastLog).indexOf('missed') >= 0) missed = true;
+      }
+
+      // static info
+      $('p1-name').textContent = (b.p1Mon.isShiny ? '✨' : '') + b.p1Mon.name;
+      $('p1-user').textContent = '@' + b.p1;
+      setBattleSprite($('p1-img'), b.p1Mon, true, 170);
+      $('p2-hud').classList.toggle('hide', !hasP2);
+      $('p2-spr').classList.toggle('hide', !hasP2);
+      $('p2-platform').classList.toggle('hide', !hasP2);
+      if (hasP2) {
+        $('p2-name').textContent = (b.p2Mon.isShiny ? '✨' : '') + b.p2Mon.name;
+        $('p2-user').textContent = '@' + b.p2;
+        setBattleSprite($('p2-img'), b.p2Mon, false, 130);
+      }
+
+      // entrances
+      if (isNew) {
+        $('p1-fx').classList.remove('faint');
+        $('p2-fx').classList.remove('faint');
+        play($('p1-fx'), 'enter-left', 950);
+        play($('p1-hud'), 'hud-in', 650);
+        if (hasP2) { play($('p2-fx'), 'enter-right', 950); play($('p2-hud'), 'hud-in', 650); }
+      } else if (hasP2 && !cur.hasP2) {
+        play($('p2-fx'), 'enter-right', 950);
+        play($('p2-hud'), 'hud-in', 650);
+      }
+
+      // attacks
+      if (hit) attackAnim(hit[0], hit[1]);
+      if (missed) {
+        var attacker = (b.turn === b.p1) ? 'p2' : 'p1';
+        play($(attacker + '-fx'), 'lunge-' + attacker, 650);
+      }
+
+      // health bars (delayed so they drop when the hit lands)
+      var delay = hit ? 450 : 0;
+      var instant = isNew;
+      setTimeout(function () {
+        setHp('p1', p1Hp, b.p1Mon.maxHp, instant);
+        if (hasP2) setHp('p2', p2Hp, b.p2Mon.maxHp, instant);
+        else { $('p2-hp-text').textContent = ''; }
+      }, delay);
+
+      // fainting
+      if (isResult && res.reason === 'faint') {
+        if (p1Hp <= 0) setTimeout(function () { $('p1-fx').classList.add('faint'); }, 1100);
+        if (hasP2 && p2Hp <= 0) setTimeout(function () { $('p2-fx').classList.add('faint'); }, 1100);
+      }
+
+      // text, menu, banner
+      typeText($('log-text'), isResult ? res.message : (b.lastLog || ''));
+      renderMoves(b, isResult);
+      var banner = $('banner');
+      if (isResult) {
+        banner.textContent = res.winner ? ('🏆 @' + res.winner + ' WINS!') : 'DRAW!';
+        if (!banner.classList.contains('show')) setTimeout(function () { banner.classList.add('show'); }, 1200);
+      } else {
+        banner.classList.remove('show');
+      }
+
+      cur = { key: key, p1Hp: p1Hp, p2Hp: p2Hp, log: b.lastLog, hasP2: hasP2 };
+      lastB = b;
+      showingResult = isResult;
+      renderTimer();
+    }
+
+    // ---------- polling ----------
     async function tick() {
       try {
-        const res = await fetch('/battle-data');
-        const data = await res.json();
-        const frame = document.getElementById('gbc-frame');
-        const card = document.getElementById('spawn-card');
+        var res = await fetch('/battle-data');
+        var data = await res.json();
+        if (data.now) offset = data.now - Date.now();
+        if (data.limits) limits = data.limits;
+
+        var frame = $('gbc-frame');
+        var card = $('spawn-card');
+
+        var result = data.result;
+        var resultFresh = result && (serverNow() - result.at) < 10000;
 
         if (data.active && data.battle) {
           card.style.display = 'none';
           frame.style.display = 'block';
-          const b = data.battle;
-          document.getElementById('p1-name').textContent = (b.p1Mon.isShiny ? '✨' : '') + b.p1Mon.name;
-          document.getElementById('p1-user').textContent = '@' + b.p1;
-          document.getElementById('p1-hp-text').textContent = b.p1Mon.currentHp + '/' + b.p1Mon.maxHp;
-          setSprite(document.getElementById('p1-sprite'), b.p1Mon, true);
-          setHp(document.getElementById('p1-hp-bar'), b.p1Mon.currentHp, b.p1Mon.maxHp);
-
-          if (b.p2Mon) {
-            document.getElementById('p2-name').textContent = (b.p2Mon.isShiny ? '✨' : '') + b.p2Mon.name;
-            document.getElementById('p2-user').textContent = '@' + b.p2;
-            document.getElementById('p2-hp-text').textContent = b.p2Mon.currentHp + '/' + b.p2Mon.maxHp;
-            setSprite(document.getElementById('p2-sprite'), b.p2Mon, false);
-            document.getElementById('p2-sprite').style.visibility = 'visible';
-            setHp(document.getElementById('p2-hp-bar'), b.p2Mon.currentHp, b.p2Mon.maxHp);
-          } else {
-            document.getElementById('p2-name').textContent = 'WAITING...';
-            document.getElementById('p2-user').textContent = '@' + b.p2;
-            document.getElementById('p2-hp-text').textContent = '--/--';
-            document.getElementById('p2-sprite').style.visibility = 'hidden';
-          }
-          const activeMon = (b.turn === b.p2 && b.p2Mon) ? b.p2Mon : b.p1Mon;
-          document.getElementById('log-text').textContent = (b.lastLog || '') + ' (@' + b.turn + '\\'s turn: !move 1-4)';
-          document.getElementById('moves-grid').innerHTML = activeMon.moves.map((m, i) => '<div class="move-item"><span class="move-num">' + (i + 1) + '</span><span>' + m.name.toUpperCase() + '</span></div>').join('');
+          renderBattle(data.battle, false, null);
+          return;
+        }
+        if (resultFresh) {
+          card.style.display = 'none';
+          frame.style.display = 'block';
+          renderBattle(result, true, result);
           return;
         }
 
         frame.style.display = 'none';
-        const s = data.spawn;
-        if (s && s.spawnedAt && Date.now() < (s.expiresAt || (s.spawnedAt + 60000))) {
+        cur = null;
+        lastB = null;
+        showingResult = false;
+        $('banner').classList.remove('show');
+
+        var s = data.spawn;
+        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 60000))) {
           card.style.display = 'block';
-          const banner = document.getElementById('spawn-banner');
+          var banner = $('spawn-banner');
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
           banner.classList.toggle('shiny', Boolean(s.isShiny));
-          setAnimatedSprite(document.getElementById('spawn-sprite'), s);
-          document.getElementById('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
-          document.getElementById('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
+          setAnimatedSprite($('spawn-sprite'), s);
+          $('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
+          $('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
         } else {
           card.style.display = 'none';
         }
       } catch (e) {}
     }
-    setInterval(tick, 1500);
+    setInterval(tick, 1000);
+    setInterval(renderTimer, 250);
     tick();
   </script>
 </body>
+</html>
 </html>`);
 });
 
