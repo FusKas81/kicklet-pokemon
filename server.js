@@ -801,8 +801,8 @@ app.get('/overlay', (req, res) => {
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: transparent; font-family: 'Press Start 2P', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-    #spawn-card, #gbc-frame { display: none; background: #2b2d42; border: 6px solid #1a1b26; border-radius: 16px 16px 40px 16px; padding: 18px 22px 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.8); }
+    body { background: transparent; font-family: 'Press Start 2P', monospace; overflow: hidden; position: relative; width: 100vw; height: 100vh; }
+    #spawn-card, #gbc-frame { position: absolute; left: 50%; transform: translateX(-50%); display: none; background: #2b2d42; border: 6px solid #1a1b26; border-radius: 16px 16px 40px 16px; padding: 18px 22px 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.8); }
     #spawn-card { width: 440px; }
     #gbc-frame { width: 700px; }
     #spawn-screen { background: #f8f8f8; border: 5px solid #111; border-radius: 6px; padding: 14px; color: #181818; text-align: center; }
@@ -1100,7 +1100,7 @@ app.get('/overlay', (req, res) => {
       // static info
       $('p1-name').textContent = (b.p1Mon.isShiny ? '✨' : '') + b.p1Mon.name;
       $('p1-user').textContent = '@' + b.p1;
-      setBattleSprite($('p1-img'), b.p1Mon, true, 170);
+      setBattleSprite($('p1-img'), b.p1Mon, true, 150);
       $('p2-hud').classList.toggle('hide', !hasP2);
       $('p2-spr').classList.toggle('hide', !hasP2);
       $('p2-platform').classList.toggle('hide', !hasP2);
@@ -1175,6 +1175,39 @@ app.get('/overlay', (req, res) => {
     }
 
     // ---------- polling ----------
+    // Spawn card: centred on screen. Battle: bottom centre.
+    // If both are visible, the spawn card moves to the top and both shrink (same scale) so they never overlap.
+    function layout() {
+      var card = $('spawn-card');
+      var frame = $('gbc-frame');
+      var cardOn = card.style.display === 'block';
+      var frameOn = frame.style.display === 'block';
+      if (!cardOn && !frameOn) return;
+      var vw = window.innerWidth;
+      var vh = window.innerHeight;
+      var pad = 16;
+      var ch = cardOn ? card.offsetHeight : 0;
+      var fh = frameOn ? frame.offsetHeight : 0;
+      var widest = Math.max(cardOn ? card.offsetWidth : 0, frameOn ? frame.offsetWidth : 0, 1);
+
+      var s = 1;
+      if (cardOn && frameOn) s = (vh - pad * 3) / (ch + fh);
+      else s = (vh - pad * 2) / Math.max(ch, fh, 1);
+      s = Math.max(0.2, Math.min(1, s, (vw - pad * 2) / widest));
+
+      if (cardOn) {
+        card.style.transformOrigin = 'top center';
+        card.style.transform = 'translateX(-50%) scale(' + s + ')';
+        card.style.top = (frameOn ? pad : Math.max(pad, (vh - ch * s) / 2)) + 'px';
+      }
+      if (frameOn) {
+        frame.style.transformOrigin = 'bottom center';
+        frame.style.transform = 'translateX(-50%) scale(' + s + ')';
+        frame.style.bottom = pad + 'px';
+      }
+    }
+    window.addEventListener('resize', layout);
+
     async function tick() {
       try {
         var res = await fetch('/battle-data');
@@ -1188,25 +1221,22 @@ app.get('/overlay', (req, res) => {
         var result = data.result;
         var resultFresh = result && (serverNow() - result.at) < 10000;
 
+        // battle (bottom centre)
         if (data.active && data.battle) {
-          card.style.display = 'none';
           frame.style.display = 'block';
           renderBattle(data.battle, false, null);
-          return;
-        }
-        if (resultFresh) {
-          card.style.display = 'none';
+        } else if (resultFresh) {
           frame.style.display = 'block';
           renderBattle(result, true, result);
-          return;
+        } else {
+          frame.style.display = 'none';
+          cur = null;
+          lastB = null;
+          showingResult = false;
+          $('banner').classList.remove('show');
         }
 
-        frame.style.display = 'none';
-        cur = null;
-        lastB = null;
-        showingResult = false;
-        $('banner').classList.remove('show');
-
+        // spawned Pokémon (centre of the screen)
         var s = data.spawn;
         if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 60000))) {
           lastSpawn = s;
@@ -1222,6 +1252,8 @@ app.get('/overlay', (req, res) => {
           lastSpawn = null;
           card.style.display = 'none';
         }
+
+        layout();
       } catch (e) {}
     }
     setInterval(tick, 1000);
