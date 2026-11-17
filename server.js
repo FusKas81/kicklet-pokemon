@@ -46,7 +46,7 @@ const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
 const MAX_INVENTORY = 10;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
-const SPAWN_INTERVAL_MINUTES = 10; // keep in sync with the cron-job.org schedule (only used in chat messages)
+const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const CATCH_WINDOW_MS = 60 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
@@ -503,9 +503,9 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 
   if (cmd === 'party') {
     const inv = db.users[user].inventory;
-    if (inv.length === 0) return `@${user} Your party is empty!`;
+    if (inv.length === 0) return `@${user} Your party is empty! Use !catch when a wild Pokémon appears. 💡 Catch 3 of the same Pokémon and they evolve (if they have an evolution)!`;
     const list = inv.map((p, i) => `[${i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
-    return `@${user}'s Party (${inv.length}/10): ${list}`;
+    return `@${user}'s Party (${inv.length}/10): ${list} | 💡 Have 3 of the same Pokémon and they evolve (if they have an evolution)!`;
   }
 
   if (cmd === 'info') {
@@ -555,12 +555,17 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'trade') {
+    if (args.length === 0) {
+      return `@${user} To trade, type !trade @username <slot>, e.g. !trade @ash 2 offers your slot 2 Pokémon to @ash. They accept with !accept <their slot> and you swap Pokémon. Type !party to see your slots.`;
+    }
     const target = (args[0] || '').toLowerCase().replace('@', '');
     const slot = parseInt(args[1]) - 1;
     const mon = db.users[user].inventory[slot];
-    if (!target || !db.users[target]) return `@${user} User not found.`;
+    if (!target || !db.users[target]) return `@${user} User not found. Use !trade @username <slot>, e.g. !trade @ash 2.`;
     if (target === user) return `@${user} Can't trade with yourself!`;
-    if (!mon) return `@${user} Usage: !trade @user <slot>`;
+    if (args.length < 2 || Number.isNaN(slot) || !mon) {
+      return `@${user} Pick which Pokémon to offer: !trade @${target} <slot>, e.g. !trade @${target} 1. Type !party to see your slots (1-${db.users[user].inventory.length}).`;
+    }
 
     db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
     await saveDB(db);
@@ -569,14 +574,17 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 
   if (cmd === 'accept') {
     const trade = db.pendingTrades[user];
-    if (!trade) return `@${user} No pending trades.`;
+    if (!trade) return `@${user} No pending trades. When someone offers you a trade with !trade @${user} <slot>, reply with !accept <your slot> to swap Pokémon.`;
     const mySlot = parseInt(args[0]) - 1;
     const myInv = db.users[user].inventory;
     const senderInv = db.users[trade.fromUser].inventory;
     const myMon = myInv[mySlot];
     const senderIndex = senderInv.findIndex(p => p.uid === trade.offeredUid);
 
-    if (!myMon || senderIndex === -1) {
+    if (args.length === 0 || Number.isNaN(mySlot) || !myMon) {
+      return `@${user} @${trade.fromUser} offered you ${trade.offeredName}! To accept, type !accept <slot>, e.g. !accept 1 swaps your slot 1 Pokémon for it. Type !party to see your slots (1-${myInv.length}).`;
+    }
+    if (senderIndex === -1) {
       delete db.pendingTrades[user];
       await saveDB(db);
       return `@${user} Trade failed.`;
@@ -721,7 +729,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 // --- ROUTES ---
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
-// Triggered every 10 mins by cron-job.org (posts directly to Kick chat + OBS)
+// Triggered every 5 mins by cron-job.org (posts directly to Kick chat + OBS)
 app.get('/spawn', checkSecret, async (req, res) => {
   try {
     const db = await getDB();
@@ -804,6 +812,9 @@ app.get('/overlay', (req, res) => {
     #spawn-sprite { width: 160px; height: 160px; }
     #spawn-name { font-size: 18px; margin: 10px 0 8px; letter-spacing: 1px; }
     #spawn-types { font-size: 10px; color: #555; margin-bottom: 12px; }
+    #spawn-timer { font-size: 12px; margin-bottom: 6px; }
+    #spawn-bar-bg { height: 10px; background: #ddd; border: 3px solid #181818; border-radius: 6px; overflow: hidden; margin: 0 20px 12px; }
+    #spawn-bar { height: 100%; width: 100%; background: #22c55e; }
     .spawn-cta { border-top: 3px dashed #999; padding-top: 10px; font-size: 11px; color: #16a34a; }
     .brand { text-align: center; margin-top: 12px; font-size: 13px; letter-spacing: 2px; color: #8d99ae; }
     .brand span:nth-child(1) { color: #ef4444; } .brand span:nth-child(2) { color: #a855f7; } .brand span:nth-child(3) { color: #22c55e; } .brand span:nth-child(4) { color: #eab308; } .brand span:nth-child(5) { color: #3b82f6; }
@@ -881,6 +892,8 @@ app.get('/overlay', (req, res) => {
       <img id="spawn-sprite" class="sprite" src="">
       <div id="spawn-name"></div>
       <div id="spawn-types"></div>
+      <div id="spawn-timer"></div>
+      <div id="spawn-bar-bg"><div id="spawn-bar"></div></div>
       <div class="spawn-cta">TYPE !catch IN CHAT!</div>
     </div>
     <div class="brand">GAME BOY <span>C</span><span>O</span><span>L</span><span>O</span><span>R</span></div>
@@ -936,6 +949,7 @@ app.get('/overlay', (req, res) => {
     var cur = null;                 // what is currently drawn on the battle screen
     var lastB = null;               // last battle shown (used by the countdown)
     var showingResult = false;
+    var lastSpawn = null;           // spawn currently on screen (used by the countdown)
 
     function $(id) { return document.getElementById(id); }
     function serverNow() { return Date.now() + offset; }
@@ -1147,6 +1161,19 @@ app.get('/overlay', (req, res) => {
       renderTimer();
     }
 
+    function renderSpawnTimer() {
+      var txt = $('spawn-timer');
+      var bar = $('spawn-bar');
+      if (!lastSpawn) return;
+      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 60000);
+      var total = Math.max(1, expires - lastSpawn.spawnedAt);
+      var left = Math.max(0, expires - serverNow());
+      var secs = Math.ceil(left / 1000);
+      txt.textContent = secs > 0 ? ('ESCAPES IN ' + secs + 's') : 'IT FLED!';
+      bar.style.width = (left / total * 100) + '%';
+      bar.style.background = secs <= 10 ? '#ef4444' : (secs <= 20 ? '#eab308' : '#22c55e');
+    }
+
     // ---------- polling ----------
     async function tick() {
       try {
@@ -1182,6 +1209,7 @@ app.get('/overlay', (req, res) => {
 
         var s = data.spawn;
         if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 60000))) {
+          lastSpawn = s;
           card.style.display = 'block';
           var banner = $('spawn-banner');
           banner.textContent = s.isShiny ? '✨ RARE SHINY APPEARED! ✨' : 'WILD POKÉMON APPEARED!';
@@ -1189,13 +1217,16 @@ app.get('/overlay', (req, res) => {
           setAnimatedSprite($('spawn-sprite'), s);
           $('spawn-name').textContent = (s.isShiny ? '✨' : '') + s.name;
           $('spawn-types').textContent = 'TYPE: ' + s.types.join(' / ').toUpperCase();
+          renderSpawnTimer();
         } else {
+          lastSpawn = null;
           card.style.display = 'none';
         }
       } catch (e) {}
     }
     setInterval(tick, 1000);
     setInterval(renderTimer, 250);
+    setInterval(renderSpawnTimer, 250);
     tick();
   </script>
 </body>
