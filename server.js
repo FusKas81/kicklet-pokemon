@@ -1357,7 +1357,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
-    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party [page] (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help`;
+    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help`;
   }
 
   return null;
