@@ -909,6 +909,7 @@ async function checkEvolution(db, user) {
 
 // Remember how the last battle ended so the OBS overlay can play the ending animation
 function recordBattleEnd(db, battle, winner, reason, message) {
+  if (winner && db.users[winner]) db.users[winner].battleWins = (db.users[winner].battleWins || 0) + 1;
   db.lastBattleResult = {
     at: Date.now(),
     p1: battle.p1,
@@ -1059,6 +1060,14 @@ async function triggerSpawn(db) {
   return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch within ${CATCH_WINDOW_MS / 1000} seconds to throw a Pokéball! (${MAX_CATCH_TRIES} tries each)`;
 }
 
+// Time until the next spawn (spawns come from the cron job every SPAWN_INTERVAL_MINUTES)
+function nextSpawnText(spawn) {
+  const msLeft = spawn.spawnedAt + SPAWN_INTERVAL_MINUTES * 60 * 1000 - Date.now();
+  if (msLeft <= 0) return 'a few seconds (any moment now)';
+  if (msLeft >= 60000) return `${Math.floor(msLeft / 60000)}m ${Math.floor((msLeft % 60000) / 1000)}s`;
+  return `${Math.ceil(msLeft / 1000)}s`;
+}
+
 async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   const user = (rawUser || '').toLowerCase().replace('@', '');
   const cmd = (rawCmd || '').toLowerCase();
@@ -1079,11 +1088,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
     if (Date.now() > spawnExpiresAt(spawn)) {
-      const msLeft = spawn.spawnedAt + SPAWN_INTERVAL_MINUTES * 60 * 1000 - Date.now();
-      const nextTxt = msLeft > 0
-        ? (msLeft >= 60000 ? `${Math.floor(msLeft / 60000)}m ${Math.floor((msLeft % 60000) / 1000)}s` : `${Math.ceil(msLeft / 1000)}s`)
-        : 'any moment now';
-      return `@${user} Too late, the wild ${spawn.name} fled! Wait for the next spawn. Next spawn in ${nextTxt}!`;
+      return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(spawn)}!`;
     }
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}!`;
     if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (${MAX_INVENTORY}/${MAX_INVENTORY})! Use !release <1-${MAX_INVENTORY}>.`;
@@ -1118,7 +1123,8 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
 
   if (cmd === 'spawncheck' || cmd === 'wild') {
     const spawn = db.activeSpawn;
-    if (!spawn || Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now!`;
+    if (!spawn) return `@${user} No wild Pokémon right now!`;
+    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now! Next spawn in ${nextSpawnText(spawn)}!`;
     const secsLeft = Math.max(1, Math.ceil((spawnExpiresAt(spawn) - Date.now()) / 1000));
     const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
     const triesLeft = MAX_CATCH_TRIES - ((spawn.attempts && spawn.attempts[user]) || 0);
@@ -1178,15 +1184,22 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'leaderboard') {
-    const rankings = Object.entries(db.users)
-      .map(([name, data]) => ({ name, caught: data.totalCaught ?? data.inventory.length }))
-      .filter(entry => entry.caught > 0)
-      .sort((a, b) => b.caught - a.caught)
-      .slice(0, 5);
-
-    if (rankings.length === 0) return '🏆 Nobody has caught any Pokémon yet! Be the first with !catch!';
-    const board = rankings.map((entry, idx) => `#${idx + 1} @${entry.name} (${entry.caught})`).join(' | ');
-    return `🏆 Top Pokémon Trainers: ${board}`;
+    const medals = ['🥇', '🥈', '🥉'];
+    const top3 = (valueOf) => Object.entries(db.users)
+      .map(([name, data]) => ({ name, n: valueOf(data) }))
+      .filter(e => e.n > 0)
+      .sort((x, y) => y.n - x.n)
+      .slice(0, 3)
+      .map((e, i) => `${medals[i]} @${e.name} (${e.n})`)
+      .join(' | ');
+    const catches = top3(d => d.totalCaught ?? d.inventory.length);
+    const wins = top3(d => d.battleWins || 0);
+    const mode = (args[0] || '').toLowerCase();
+    const catchLine = `🏆 Most catches: ${catches || 'nobody yet, be the first with !catch!'}`;
+    const winLine = `⚔️ Most battle wins: ${wins || 'nobody yet, challenge someone with !battle!'}`;
+    if (mode.startsWith('catch')) return catchLine;
+    if (mode.startsWith('battle') || mode.startsWith('win')) return winLine;
+    return `${catchLine} || ${winLine}`;
   }
 
   if (cmd === 'trade') {
@@ -1344,7 +1357,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
-    return `🎮 Commands: !catch | !spawncheck | !party [page] | !info <1-${MAX_INVENTORY}> | !release <1-${MAX_INVENTORY}> | !pokedex | !leaderboard | !trade @user <slot> & !accept <slot> | !battle @user <slot>, !move <1-4>, !forfeit`;
+    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party [page] (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help`;
   }
 
   return null;
