@@ -1309,7 +1309,12 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   if (cmd === 'move') {
     const battleKey = findBattleKey(db, user);
     const battle = battleKey ? db.activeBattles[battleKey] : null;
-    if (!battle || !battle.p2Mon) return `@${user} Not in a battle.`;
+    if (!battle || !battle.p2Mon) {
+      const pending = battle && !battle.p2Mon
+        ? (battle.p1 === user ? ` Your challenge to @${battle.p2} hasn't been accepted yet.` : ` @${battle.p1} challenged you, accept with !battle @${battle.p1} <slot>.`)
+        : '';
+      return `@${user} !move only works during a battle.${pending} To battle: type !battle @username <slot> to challenge a trainer with the Pokémon in that slot (see !party). They accept with !battle @${user} <slot>, then both of you pick !move <1-4> each round.`;
+    }
 
     // Enforce time limits even if the background check hasn't caught up yet
     const timerMsg = applyBattleTimers(db, battleKey, battle);
