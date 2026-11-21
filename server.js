@@ -1201,7 +1201,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const uniqueCount = db.users[user].pokedex.length;
     const totalCaught = db.users[user].totalCaught;
     const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
-    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught}`;
+    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | 🌐 Watch all your captured Pokémon here: https://kicklet-pokemon.onrender.com/pokedex`;
   }
 
   if (cmd === 'leaderboard') {
