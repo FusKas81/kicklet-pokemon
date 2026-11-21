@@ -1,10 +1,4 @@
 // pokedex-site.js
-// Public website for the Pokémon bot: shows every trainer's Pokédex and all caught Pokémon
-// walking around on a field with animated sprites (same sprites as the OBS overlay).
-//
-// Pages:   /pokedex            -> the website
-// API:     /api/pokedex        -> public JSON (no secrets, no internal uids)
-
 export default function registerPokedexSite(app, { getDB, GEN1, MAX_POKEMON_ID }) {
   const species = Object.entries(GEN1.mons)
     .map(([id, m]) => ({ id: Number(id), name: m.n, types: m.t }))
@@ -43,7 +37,7 @@ export default function registerPokedexSite(app, { getDB, GEN1, MAX_POKEMON_ID }
   app.get(['/pokedex', '/pokedex/'], (req, res) => res.type('html').send(PAGE));
 }
 
-// NOTE: this page is a plain template string. Do not use backticks or dollar-brace inside the script.
+// NOTE: plain template string. Do not use backticks or dollar-brace inside the script.
 const PAGE = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -67,7 +61,6 @@ const PAGE = `<!DOCTYPE html>
   .chip { font-size:8px; background:#7c3aed; color:#fff; padding:5px 8px; border-radius:4px; cursor:pointer; border:0; font-family:inherit; }
   .chip[hidden] { display:none; }
 
-  /* ---------- field ---------- */
   #field { position:relative; height:440px; overflow:hidden; border:6px solid var(--line); border-radius:12px;
     background:
       radial-gradient(circle at 20% 30%, rgba(255,255,255,.05) 0 40px, transparent 41px),
@@ -84,7 +77,6 @@ const PAGE = `<!DOCTYPE html>
   #field-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; color:#fff; text-shadow:2px 2px 0 #000; text-align:center; padding:20px; }
   .note { font-size:8px; color:var(--mute); margin-top:8px; }
 
-  /* ---------- trainers ---------- */
   #search { width:100%; max-width:340px; background:var(--panel); border:4px solid var(--line); color:var(--ink); font-family:inherit; font-size:10px; padding:10px; border-radius:6px; outline:none; }
   #trainers { display:grid; grid-template-columns:repeat(auto-fill, minmax(420px, 1fr)); gap:14px; }
   @media (max-width:520px) { #trainers { grid-template-columns:1fr; } }
@@ -127,7 +119,7 @@ const PAGE = `<!DOCTYPE html>
 <script>
   var BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
   var MAX_WALKERS = 220;
-  var data = null, lastJson = '', selected = null, walkers = [], names = {};
+  var data = null, lastJson = '', selected = null, walkers = [];
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;'); }
@@ -135,7 +127,6 @@ const PAGE = `<!DOCTYPE html>
   function png(id, shiny) { return BASE + (shiny ? '/shiny' : '') + '/' + id + '.png'; }
   function fallback(img, id, shiny) { img.onerror = function () { img.onerror = null; img.src = png(id, shiny); }; }
 
-  // ---------- stats ----------
   function renderStats() {
     var trainers = data.users.length, caught = 0, species = {}, shinies = 0;
     data.users.forEach(function (u) {
@@ -152,7 +143,6 @@ const PAGE = `<!DOCTYPE html>
     $('stats').innerHTML = items.map(function (i) { return '<div class="stat"><b>' + i[0] + '</b>' + i[1] + '</div>'; }).join('');
   }
 
-  // ---------- field (moving pokémon) ----------
   function fieldSize() { var f = $('field'); return { w: f.clientWidth, h: f.clientHeight }; }
 
   function buildField() {
@@ -165,7 +155,6 @@ const PAGE = `<!DOCTYPE html>
       u.party.forEach(function (p) { list.push({ user: u.name, p: p }); });
     });
     var total = list.length;
-    // keep it smooth: shuffle and cap
     for (var i = list.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = list[i]; list[i] = list[j]; list[j] = t; }
     list = list.slice(0, MAX_WALKERS);
 
@@ -201,7 +190,7 @@ const PAGE = `<!DOCTYPE html>
   }
 
   function pickDirection(w) {
-    if (Math.random() < 0.3) { w.vx = 0; w.vy = 0; w.wait = 40 + Math.random() * 160; return; } // stand still for a bit
+    if (Math.random() < 0.3) { w.vx = 0; w.vy = 0; w.wait = 40 + Math.random() * 160; return; }
     var a = Math.random() * Math.PI * 2;
     w.vx = Math.cos(a) * w.speed; w.vy = Math.sin(a) * w.speed * 0.6;
     w.wait = 80 + Math.random() * 260;
@@ -221,12 +210,11 @@ const PAGE = `<!DOCTYPE html>
       if (w.y < 4) { w.y = 4; w.vy = Math.abs(w.vy); }
       if (w.y > maxY) { w.y = maxY; w.vy = -Math.abs(w.vy); }
       w.el.style.transform = 'translate3d(' + w.x.toFixed(1) + 'px,' + w.y.toFixed(1) + 'px,0)';
-      w.el.style.zIndex = Math.floor(w.y); // lower on screen = in front
+      w.el.style.zIndex = Math.floor(w.y);
     }
     requestAnimationFrame(loop);
   }
 
-  // ---------- trainers + pokédex grids ----------
   function renderTrainers() {
     var q = $('search').value.trim().toLowerCase();
     var users = data.users.filter(function (u) { return !q || u.name.indexOf(q) !== -1; });
@@ -263,7 +251,6 @@ const PAGE = `<!DOCTYPE html>
     if (selected) $('field').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  // ---------- load ----------
   async function load() {
     try {
       var res = await fetch('/api/pokedex');
@@ -284,7 +271,6 @@ const PAGE = `<!DOCTYPE html>
 
   $('clear').onclick = function () { selected = null; buildField(); renderTrainers(); };
   $('search').oninput = function () { if (data) renderTrainers(); };
-  window.addEventListener('resize', function () { /* walkers clamp themselves on the next frame */ });
   load();
   setInterval(load, 30000);
   requestAnimationFrame(loop);
