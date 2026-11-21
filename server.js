@@ -21,7 +21,9 @@ const StateSchema = new mongoose.Schema({
   pendingTrades: { type: Object, default: {} },
   activeBattles: { type: Object, default: {} },
   kickAuth: { type: Object, default: null },
-  lastBattleResult: { type: Object, default: null }
+  lastBattleResult: { type: Object, default: null },
+  lastAutoSpawnAt: { type: Number, default: 0 },
+  autoSpawnBlockedUntil: { type: Number, default: 0 }
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
@@ -1062,8 +1064,12 @@ async function triggerSpawn(db) {
 }
 
 // Time until the next spawn (spawns come from the cron job every SPAWN_INTERVAL_MINUTES)
-function nextSpawnText(spawn) {
-  const msLeft = spawn.spawnedAt + SPAWN_INTERVAL_MINUTES * 60 * 1000 - Date.now();
+function nextSpawnText(db, spawn) {
+  const interval = SPAWN_INTERVAL_MINUTES * 60 * 1000;
+  const base = db.lastAutoSpawnAt || spawn.spawnedAt;
+  let next = base + interval;
+  while (next < (db.autoSpawnBlockedUntil || 0)) next += interval; // a manual !spawn pushes the automatic spawn back
+  const msLeft = next - Date.now();
   if (msLeft <= 0) return 'a few seconds (any moment now)';
   if (msLeft >= 60000) return `${Math.floor(msLeft / 60000)}m ${Math.floor((msLeft % 60000) / 1000)}s`;
   return `${Math.ceil(msLeft / 1000)}s`;
@@ -1094,6 +1100,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     }
     const spawnMsg = await triggerSpawn(db);
     db.users[user].lastSpawnCmdAt = Date.now();
+    db.autoSpawnBlockedUntil = Date.now() + SPAWN_INTERVAL_MINUTES * 60 * 1000; // delay the automatic spawn
     await saveDB(db);
     return `🎲 @${user} spawned a random Pokémon! ⏳ !spawn now has a ${SPAWN_CMD_COOLDOWN_MS / 60000} minute cooldown. ${spawnMsg}`;
   }
@@ -1102,7 +1109,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
     if (Date.now() > spawnExpiresAt(spawn)) {
-      return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(spawn)}!`;
+      return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}!`;
     }
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}!`;
     if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (${MAX_INVENTORY}/${MAX_INVENTORY})! Use !release <1-${MAX_INVENTORY}>.`;
@@ -1138,7 +1145,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'spawncheck' || cmd === 'wild') {
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
-    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now! Next spawn in ${nextSpawnText(spawn)}!`;
+    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now! Next spawn in ${nextSpawnText(db, spawn)}!`;
     const secsLeft = Math.max(1, Math.ceil((spawnExpiresAt(spawn) - Date.now()) / 1000));
     const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
     const triesLeft = MAX_CATCH_TRIES - ((spawn.attempts && spawn.attempts[user]) || 0);
@@ -1389,6 +1396,10 @@ app.get('/ping', (req, res) => res.send('Bot is awake!'));
 app.get('/spawn', checkSecret, async (req, res) => {
   try {
     const db = await getDB();
+    if (Date.now() < (db.autoSpawnBlockedUntil || 0)) {
+      return res.send('Skipped: a !spawn was used recently, the automatic spawn is delayed.');
+    }
+    db.lastAutoSpawnAt = Date.now();
     const msg = await triggerSpawn(db);
     await sendKickChat(db, msg);
     res.send(msg);
@@ -2005,8 +2016,8 @@ setInterval(async () => {
         const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
         const catchers = spawn.caughtBy || [];
         messages.push(catchers.length > 0
-          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(spawn)}!`
-          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(spawn)}!`);
+          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(db, spawn)}!`
+          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(db, spawn)}!`);
       } else {
         messages.push(null);
       }
