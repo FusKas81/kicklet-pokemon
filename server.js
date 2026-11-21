@@ -1990,8 +1990,8 @@ setInterval(async () => {
         const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
         const catchers = spawn.caughtBy || [];
         messages.push(catchers.length > 0
-          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${SPAWN_INTERVAL_MINUTES} minutes!`
-          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${SPAWN_INTERVAL_MINUTES} minutes!`);
+          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(spawn)}!`
+          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(spawn)}!`);
       } else {
         messages.push(null);
       }
