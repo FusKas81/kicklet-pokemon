@@ -193,8 +193,17 @@ const PAGE = `<!DOCTYPE html>
   header { padding:28px 20px 10px; text-align:center; position:relative; }
   h1 { font-size:clamp(18px,4vw,30px); letter-spacing:2px; color:var(--gold); text-shadow:3px 3px 0 #000; }
   .sub { font-size:9px; color:var(--mute); margin-top:10px; }
-  #auth { margin-top:16px; font-size:9px; }
-  .who { color:var(--gold); margin-right:8px; }
+  #auth { margin-top:22px; text-align:center; font-size:14px; }
+  .who { color:var(--gold); margin-right:12px; font-size:13px; }
+  .btn.login-btn { font-size:13.5px; padding:14px 20px; border-width:4px; border-radius:9px; letter-spacing:1px;
+    animation:loginflash 1.1s ease-in-out infinite, loginbob 2.2s ease-in-out infinite; }
+  .btn.login-btn:hover { animation-play-state:paused; transform:scale(1.06); filter:brightness(1.2); }
+  @keyframes loginflash {
+    0%, 100% { background:#7c3aed; color:#fff; box-shadow:0 0 0 0 rgba(124,58,237,.7), 0 0 14px rgba(124,58,237,.6); }
+    50% { background:#f8c030; color:#14151f; box-shadow:0 0 0 12px rgba(248,192,48,0), 0 0 30px rgba(248,192,48,.95); }
+  }
+  @keyframes loginbob { 0%, 100% { transform:translateY(0) scale(1); } 50% { transform:translateY(-4px) scale(1.04); } }
+  @media (prefers-reduced-motion: reduce) { .btn.login-btn { animation:none; } }
   .btn { font-family:inherit; font-size:9px; background:#7c3aed; color:#fff; border:3px solid var(--line); border-radius:6px; padding:9px 12px; cursor:pointer; }
   .btn:hover { filter:brightness(1.15); }
   .btn.sm { font-size:8px; padding:6px 8px; background:#374151; }
@@ -310,7 +319,6 @@ const PAGE = `<!DOCTYPE html>
 <header>
   <h1>POKÉDEX HALL</h1>
   <div class="sub">Every Pokémon caught in the stream, live!</div>
-  <div id="auth"></div>
   <div class="stats" id="stats"></div>
 </header>
 
@@ -320,6 +328,7 @@ const PAGE = `<!DOCTYPE html>
     <div class="lb-title">MOST POKÉMON CAUGHT</div>
     <div id="lb"></div>
   </div>
+  <div id="auth"></div>
 </section>
 
 <section>
@@ -368,7 +377,7 @@ const PAGE = `<!DOCTYPE html>
       $('auth').innerHTML = '<span class="who">LOGGED IN: @' + esc(me) + '</span><button class="btn sm" id="b-out">LOG OUT</button>';
       $('b-out').onclick = logout;
     } else {
-      $('auth').innerHTML = '<button class="btn" id="b-in">LOGIN TO MANAGE YOUR PARTY</button>';
+      $('auth').innerHTML = '<button class="btn login-btn" id="b-in">LOGIN TO MANAGE YOUR PARTY</button>';
       $('b-in').onclick = openLogin;
     }
   }
