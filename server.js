@@ -1163,6 +1163,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY})`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
+    reply += ` | 🌐 View your Pokédex & shinies, see the Top 10 and release Pokémon on the site: ${POKEDEX_SITE}`;
     return reply;
   }
 
@@ -1411,7 +1412,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
-    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help`;
+    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help | 🌐 Site: ${POKEDEX_SITE} (Top 10 catchers, every trainer's Pokédex & shinies, release Pokémon from your party)`;
   }
 
   return null;
