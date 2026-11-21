@@ -58,6 +58,7 @@ function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
 }
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
+const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
 
 // Store temporary PKCE verifier in memory during login
 let tempPkceVerifier = null;
@@ -1181,7 +1182,8 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'party') {
     const inv = db.users[user].inventory;
     const tip = '💡 Have 3 of the same Pokémon and they evolve (if they have an evolution)!';
-    if (inv.length === 0) return `@${user} Your party is empty! Use !catch when a wild Pokémon appears. ${tip}`;
+    const siteNote = args.length === 0 ? ` | 🌐 You can also manage your !party and !release on the site: ${POKEDEX_SITE}` : '';
+    if (inv.length === 0) return `@${user} Your party is empty! Use !catch when a wild Pokémon appears. ${tip}${siteNote}`;
     const PER_PAGE = 15;
     const pages = Math.ceil(inv.length / PER_PAGE);
     let page = parseInt(args[0]) || 1;
@@ -1189,7 +1191,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const from = (page - 1) * PER_PAGE;
     const list = inv.slice(from, from + PER_PAGE).map((p, i) => `[${from + i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
     const pageTxt = pages > 1 ? ` Page ${page}/${pages} (type !party ${page % pages + 1} for more)` : '';
-    return `@${user}'s Party (${inv.length}/${MAX_INVENTORY})${pageTxt}: ${list} | ${tip}`;
+    return `@${user}'s Party (${inv.length}/${MAX_INVENTORY})${pageTxt}: ${list} | ${tip}${siteNote}`;
   }
 
   if (cmd === 'info') {
@@ -1209,10 +1211,11 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'release') {
     const inv = db.users[user].inventory;
-    if (inv.length === 0) return `@${user} Your party is empty, nothing to release!`;
+    const siteNote = args.length === 0 ? ` | 🌐 You can also manage your !party and !release on the site: ${POKEDEX_SITE}` : '';
+    if (inv.length === 0) return `@${user} Your party is empty, nothing to release!${siteNote}`;
     const slot = parseInt(args[0]) - 1;
     if (args.length === 0 || Number.isNaN(slot)) {
-      return `@${user} To release a Pokémon, type !release <slot number>, e.g. !release 3 releases the Pokémon in slot 3. Type !party to see your slots (1-${inv.length}).`;
+      return `@${user} To release a Pokémon, type !release <slot number>, e.g. !release 3 releases the Pokémon in slot 3. Type !party to see your slots (1-${inv.length}).${siteNote}`;
     }
     if (!inv[slot]) return `@${user} You have no Pokémon in slot ${slot + 1}. Pick a slot from 1-${inv.length} (check !party), e.g. !release 1.`;
     const released = inv.splice(slot, 1)[0];
