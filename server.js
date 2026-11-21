@@ -47,6 +47,7 @@ const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
 const MAX_INVENTORY = 15;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
+const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
 const CATCH_WINDOW_MS = 60 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
@@ -1068,7 +1069,7 @@ function nextSpawnText(spawn) {
   return `${Math.ceil(msLeft / 1000)}s`;
 }
 
-async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
+async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub = false) {
   const user = (rawUser || '').toLowerCase().replace('@', '');
   const cmd = (rawCmd || '').toLowerCase();
   const args = (rawArgs || '').trim().split(/\s+/).filter(Boolean);
@@ -1080,8 +1081,21 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false) {
   if (upgradeUser(db, user)) await saveDB(db); // old Pokémon get real Gen 1 stats and moves
 
   if (cmd === 'spawn') {
-    if (!isMod) return `@${user} Only moderators can use !spawn.`;
-    return await triggerSpawn(db);
+    if (!isMod && !isSub) return `@${user} !spawn is only available to the channel owner, moderators and subscribers.`;
+    const live = db.activeSpawn;
+    if (live && Date.now() < spawnExpiresAt(live)) {
+      const secsLeft = Math.ceil((spawnExpiresAt(live) - Date.now()) / 1000);
+      return `@${user} A wild ${live.name} can still be caught (${secsLeft}s left)! Wait until it flees to use !spawn.`;
+    }
+    const cdLeft = (db.users[user].lastSpawnCmdAt || 0) + SPAWN_CMD_COOLDOWN_MS - Date.now();
+    if (cdLeft > 0) {
+      const totalSecs = Math.ceil(cdLeft / 1000), m = Math.floor(totalSecs / 60), sec = totalSecs % 60;
+      return `@${user} !spawn is on cooldown! You can use it again in ${m > 0 ? m + 'm ' : ''}${sec}s.`;
+    }
+    const spawnMsg = await triggerSpawn(db);
+    db.users[user].lastSpawnCmdAt = Date.now();
+    await saveDB(db);
+    return `🎲 @${user} spawned a random Pokémon! ⏳ !spawn now has a ${SPAWN_CMD_COOLDOWN_MS / 60000} minute cooldown. ${spawnMsg}`;
   }
 
   if (cmd === 'catch') {
@@ -1408,7 +1422,8 @@ app.post('/kick-webhook', async (req, res) => {
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
     const db = await getDB();
-    const reply = await processCommand(db, sender, cmd, args, isMod);
+    const isSub = badges.some(b => ['subscriber', 'founder'].includes(b.type));
+    const reply = await processCommand(db, sender, cmd, args, isMod, isSub);
     if (reply) await sendKickChat(db, reply);
   } catch (err) {
     console.error('❌ Webhook processing error:', err.message);
