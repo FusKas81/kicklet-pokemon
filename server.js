@@ -2588,6 +2588,37 @@ const PAGE = `<!DOCTYPE html>
     return head + mv + '<br><br>Log in (button below the leaderboards) to manage your party';
   }
 
+  function releaseConfirm(el) {
+    var name = pretty(el.getAttribute('data-name'));
+    var shiny = el.getAttribute('data-shiny') === '1';
+    openModal('<div class="mt">REMOVE FROM PARTY?</div>' +
+      '<img class="big" src="' + png(el.getAttribute('data-id'), shiny) + '" alt="">' +
+      '<div>' + (shiny ? '✨ ' : '') + esc(name) + ' Lv' + esc(el.getAttribute('data-level')) + '<br>will be released. This cannot be undone.</div>' +
+      '<div class="err" id="rl-err"></div>' +
+      '<div class="mb"><button class="btn yes" id="rl-yes">YES</button><button class="btn no" id="rl-no">NO</button></div>');
+    $('rl-no').onclick = closeModal;
+    $('rl-yes').onclick = async function () {
+      $('rl-yes').disabled = true; $('rl-no').disabled = true;
+      try {
+        var r = await fetch('/api/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ slot: Number(el.getAttribute('data-slot')), id: Number(el.getAttribute('data-id')), shiny: shiny })
+        });
+        var j = await r.json();
+        if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); openLogin('Your login expired. Please log in again.'); return; }
+        if (!r.ok) { $('rl-err').textContent = j.error || 'Something went wrong.'; $('rl-yes').disabled = false; $('rl-no').disabled = false; return; }
+        closeModal();
+        toast(pretty(j.name) + ' was released from your party.');
+        lastJson = '';
+        load();
+      } catch (e) {
+        $('rl-err').textContent = 'Could not reach the server.';
+        $('rl-yes').disabled = false; $('rl-no').disabled = false;
+      }
+    };
+  }
+
   function clickMon(el) {
     var owner = el.getAttribute('data-user');
     if (!me) { openLogin('Log in to manage your party. Type your Kick username and confirm it in the stream chat.'); return; }
