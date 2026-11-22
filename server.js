@@ -2531,6 +2531,7 @@ const PAGE = `<!DOCTYPE html>
         store('ph_token', token);
         closeModal();
         renderAuth();
+        if (data) { renderTrainers(); goToTrainer(me); }
         toast('Logged in as @' + me + '! You will stay logged in on this browser. Press a Pokémon in your party to release it.');
       } else if (j.status === 'expired') {
         closeModal();
@@ -2816,6 +2817,8 @@ const PAGE = `<!DOCTYPE html>
   function renderTrainers() {
     var q = $('search').value.trim().toLowerCase();
     var users = data.users.filter(function (u) { return !q || u.name.indexOf(q) !== -1; });
+    // the logged-in trainer always goes first (other trainers keep their rank order)
+    if (me) users = users.filter(function (u) { return u.name === me; }).concat(users.filter(function (u) { return u.name !== me; }));
     if (!users.length) { $('trainers').innerHTML = '<div class="empty">' + (data.users.length ? 'NO TRAINER FOUND' : 'NOBODY HAS CAUGHT A POKÉMON YET!') + '</div>'; return; }
 
     $('trainers').innerHTML = users.map(function (u) {
