@@ -59,7 +59,7 @@ function spawnExpiresAt(spawn) {
 }
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
-const SITE_NOTE = `🌐 Manage your Pokemon here ➡️ ${POKEDEX_SITE}`;
+const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 
 // Store temporary PKCE verifier in memory during login
 let tempPkceVerifier = null;
@@ -1229,7 +1229,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const uniqueCount = db.users[user].pokedex.length;
     const totalCaught = db.users[user].totalCaught;
     const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
-    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | ${SITE_NOTE}`;
+    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | 🌐 See all your captured Pokemon and manage your Pokemon here ➡️ ${POKEDEX_SITE}`;
   }
 
   if (cmd === 'leaderboard') {
