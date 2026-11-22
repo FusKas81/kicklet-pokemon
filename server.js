@@ -2063,9 +2063,6 @@ setInterval(async () => {
   }
 }, 3000);
 
-// ===================================================================
-// POKEDEX WEBSITE (/pokedex) + PUBLIC JSON (/api/pokedex) + CHAT-VERIFIED LOGIN
-// ===================================================================
 // pokedex-site.js
 // Public website for the Pokémon bot: animated top-10 catch leaderboard, every trainer's Pokédex,
 // a shinies column, and a chat-verified login so trainers can release Pokémon from their party.
@@ -2104,7 +2101,7 @@ function registerPokedexSite(app, { getDB, saveDB, GEN1, MAX_POKEMON_ID, webLogi
               battleWins: u.battleWins || 0,
               pokedex: dex.slice().sort((a, b) => a - b),
               shinies: [...shinySet].sort((a, b) => a - b),
-              party: inv.map((p, i) => ({ slot: i, id: p.id, name: p.name, shiny: Boolean(p.isShiny), level: p.level || 50 }))
+              party: inv.map((p, i) => ({ slot: i, id: p.id, name: p.name, shiny: Boolean(p.isShiny), level: p.level || 50, moves: (Array.isArray(p.moves) ? p.moves : []).map((m) => ({ n: m.name, t: m.type, p: m.power, pp: m.maxPp })) }))
             };
           })
           .filter((u) => u.totalCaught > 0 || u.pokedex.length > 0 || u.party.length > 0)
@@ -2285,15 +2282,19 @@ const PAGE = `<!DOCTYPE html>
   section { max-width:1300px; margin:26px auto; padding:0 14px; }
   h2 { font-size:12px; color:var(--gold); margin-bottom:12px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
 
-  /* ---------- animated leaderboard ---------- */
-  .lb-wrap { position:relative; overflow:hidden; background:var(--panel); border:5px solid var(--line); border-radius:12px; padding:16px; }
+  /* ---------- three equal columns: catches / fight wins / chat commands ---------- */
+  .boards { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; align-items:stretch; }
+  @media (max-width:1050px) { .boards { grid-template-columns:1fr; } }
+  .lb-wrap { position:relative; overflow:hidden; background:var(--panel); border:5px solid var(--line); border-radius:12px; padding:14px; height:660px; display:flex; flex-direction:column; }
+  @media (max-width:1050px) { .lb-wrap { height:auto; } }
   .lb-wrap::before { content:''; position:absolute; inset:0; pointer-events:none;
     background:linear-gradient(110deg, transparent 38%, rgba(248,192,48,.10) 50%, transparent 62%); background-size:250% 100%;
     animation:sweep 5s linear infinite; }
   @keyframes sweep { from { background-position:150% 0; } to { background-position:-100% 0; } }
-  .lb-title { text-align:center; font-size:10px; color:var(--mute); margin-bottom:12px; }
-  .lb-row { position:relative; display:grid; grid-template-columns:48px minmax(80px,220px) 1fr 70px; align-items:center; gap:10px;
-    padding:9px 12px; border-radius:8px; margin-bottom:6px; background:#181a29; cursor:pointer; transition:transform .15s, background .15s; }
+  .lb-title { text-align:center; font-size:10px; color:var(--gold); margin-bottom:12px; line-height:1.7; }
+  .lb-list { flex:1; min-height:0; }
+  .lb-row { position:relative; display:grid; grid-template-columns:38px minmax(0,1fr) 56px; align-items:center; gap:8px;
+    padding:8px 10px; border-radius:8px; margin-bottom:6px; background:#181a29; cursor:pointer; transition:transform .15s, background .15s; }
   .lb-row:hover { transform:translateX(6px); background:#222540; }
   .lb-row.empty { cursor:default; opacity:.35; }
   .lb-row.empty:hover { transform:none; background:#181a29; }
@@ -2301,12 +2302,13 @@ const PAGE = `<!DOCTYPE html>
   @keyframes slide-in { from { transform:translateX(-70px); opacity:0; } to { transform:none; opacity:1; } }
   .lb-row.bump { animation:bump 1.2s ease-out; }
   @keyframes bump { 0% { background:#365314; transform:scale(1.03); } 100% { background:#181a29; transform:none; } }
-  .lb-rank { font-size:14px; text-align:center; color:var(--mute); }
-  .lb-name { font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .lb-bar { height:12px; background:#0b0c12; border-radius:6px; overflow:hidden; }
-  .lb-bar i { display:block; height:100%; width:0; background:var(--green); border-radius:6px;
+  .lb-rank { font-size:13px; text-align:center; color:var(--mute); }
+  .lb-mid { min-width:0; }
+  .lb-name { display:block; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:5px; }
+  .lb-bar { height:10px; background:#0b0c12; border-radius:5px; overflow:hidden; }
+  .lb-bar i { display:block; height:100%; width:0; background:var(--green); border-radius:5px;
     transition:width 1.3s cubic-bezier(.2,.8,.2,1); transition-delay:calc(var(--i) * 90ms); }
-  .lb-count { font-size:12px; text-align:right; color:var(--gold); }
+  .lb-count { font-size:11px; text-align:right; color:var(--gold); }
   .lb-row.r1 { background:linear-gradient(90deg,#4a3a0a,#181a29 70%); }
   .lb-row.r2 { background:linear-gradient(90deg,#3b4048,#181a29 70%); }
   .lb-row.r3 { background:linear-gradient(90deg,#4a2e18,#181a29 70%); }
@@ -2315,11 +2317,18 @@ const PAGE = `<!DOCTYPE html>
   .lb-row.r2 .lb-bar i { background-image:linear-gradient(90deg,#9ca3af,#f3f4f6,#9ca3af); }
   .lb-row.r3 .lb-bar i { background-image:linear-gradient(90deg,#b45309,#fdba74,#b45309); }
   @keyframes shine { from { background-position:0 0; } to { background-position:-200% 0; } }
-  .lb-row.r1 .lb-rank { font-size:20px; animation:bob 1.4s ease-in-out infinite; display:inline-block; }
-  .lb-row.r2 .lb-rank, .lb-row.r3 .lb-rank { font-size:18px; }
+  .lb-row.r1 .lb-rank { font-size:19px; animation:bob 1.4s ease-in-out infinite; display:inline-block; }
+  .lb-row.r2 .lb-rank, .lb-row.r3 .lb-rank { font-size:17px; }
   @keyframes bob { 0%, 100% { transform:translateY(0) rotate(-6deg); } 50% { transform:translateY(-5px) rotate(6deg); } }
   .lb-row.r1 .lb-name { color:#fde68a; text-shadow:0 0 8px rgba(248,192,48,.6); }
-  @media (max-width:560px) { .lb-row { grid-template-columns:38px 1fr 54px; } .lb-bar { display:none; } }
+
+  /* chat commands column */
+  .cmd-list { flex:1; min-height:0; overflow-y:auto; padding-right:4px; position:relative; }
+  @media (max-width:1050px) { .cmd-list { max-height:460px; } }
+  .cmd { display:block; background:#181a29; border-radius:8px; padding:8px 10px; margin-bottom:6px; cursor:help; transition:transform .15s, background .15s; }
+  .cmd:hover { background:#222540; transform:translateX(5px); }
+  .cmd b { color:var(--gold); font-size:10px; font-weight:normal; }
+  .cmd span { display:block; font-size:7px; color:var(--mute); margin-top:4px; line-height:1.7; }
 
   /* ---------- trainers ---------- */
   #search { width:100%; max-width:340px; background:var(--panel); border:4px solid var(--line); color:var(--ink); font-family:inherit; font-size:10px; padding:10px; border-radius:6px; outline:none; }
@@ -2391,10 +2400,20 @@ const PAGE = `<!DOCTYPE html>
 </header>
 
 <section>
-  <h2><span>🏆 TOP 10 CATCHERS</span></h2>
-  <div class="lb-wrap">
-    <div class="lb-title">MOST POKÉMON CAUGHT</div>
-    <div id="lb"></div>
+  <h2><span>🏆 LEADERBOARDS &amp; CHAT COMMANDS</span></h2>
+  <div class="boards">
+    <div class="lb-wrap">
+      <div class="lb-title">🏆 TOP 10<br>MOST CATCHES</div>
+      <div class="lb-list" id="lb"></div>
+    </div>
+    <div class="lb-wrap">
+      <div class="lb-title">⚔️ TOP 10<br>MOST FIGHT WINS</div>
+      <div class="lb-list" id="lb2"></div>
+    </div>
+    <div class="lb-wrap">
+      <div class="lb-title">💬 ALL CHAT COMMANDS<br><span style="font-size:7px;color:var(--mute)">HOVER A COMMAND TO SEE HOW IT WORKS</span></div>
+      <div class="cmd-list" id="cmds"></div>
+    </div>
   </div>
   <div id="auth"></div>
 </section>
@@ -2410,7 +2429,7 @@ const PAGE = `<!DOCTYPE html>
 
 <script>
   var BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
-  var data = null, lastJson = '', byId = {}, prevCounts = null;
+  var data = null, lastJson = '', byId = {}, prevBoards = {};
   var me = null, token = null, loginTimer = null, loginState = null, toastTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -2540,44 +2559,33 @@ const PAGE = `<!DOCTYPE html>
   }
 
   // ---------- party tooltip + release ----------
+  function partyOf(owner, slot) {
+    for (var i = 0; i < data.users.length; i++) {
+      if (data.users[i].name === owner) {
+        var pt = data.users[i].party;
+        for (var j = 0; j < pt.length; j++) if (pt[j].slot === slot) return pt[j];
+      }
+    }
+    return null;
+  }
+
   function tipHtml(el) {
     var name = pretty(el.getAttribute('data-name'));
     var owner = el.getAttribute('data-user');
     var head = '<b>' + esc(name) + '</b> Lv' + esc(el.getAttribute('data-level')) + (el.getAttribute('data-shiny') === '1' ? ' ✨' : '') + ' (@' + esc(owner) + ')';
-    if (me && me === owner) return head + '<br><em>Press this Pokémon to remove it from your party</em>';
-    if (me) return head;
-    return head + '<br>Log in (top of the page) to manage your party';
-  }
-
-  function releaseConfirm(el) {
-    var name = pretty(el.getAttribute('data-name'));
-    var shiny = el.getAttribute('data-shiny') === '1';
-    openModal('<div class="mt">REMOVE FROM PARTY?</div>' +
-      '<img class="big" src="' + png(el.getAttribute('data-id'), shiny) + '" alt="">' +
-      '<div>' + (shiny ? '✨ ' : '') + esc(name) + ' Lv' + esc(el.getAttribute('data-level')) + '<br>will be released. This cannot be undone.</div>' +
-      '<div class="err" id="rl-err"></div>' +
-      '<div class="mb"><button class="btn yes" id="rl-yes">YES</button><button class="btn no" id="rl-no">NO</button></div>');
-    $('rl-no').onclick = closeModal;
-    $('rl-yes').onclick = async function () {
-      $('rl-yes').disabled = true; $('rl-no').disabled = true;
-      try {
-        var r = await fetch('/api/release', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          body: JSON.stringify({ slot: Number(el.getAttribute('data-slot')), id: Number(el.getAttribute('data-id')), shiny: shiny })
-        });
-        var j = await r.json();
-        if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); openLogin('Your login expired. Please log in again.'); return; }
-        if (!r.ok) { $('rl-err').textContent = j.error || 'Something went wrong.'; $('rl-yes').disabled = false; $('rl-no').disabled = false; return; }
-        closeModal();
-        toast(pretty(j.name) + ' was released from your party.');
-        lastJson = '';
-        load();
-      } catch (e) {
-        $('rl-err').textContent = 'Could not reach the server.';
-        $('rl-yes').disabled = false; $('rl-no').disabled = false;
-      }
-    };
+    var p = partyOf(owner, Number(el.getAttribute('data-slot')));
+    var mv = '';
+    if (p && p.moves && p.moves.length) {
+      mv = '<br><br><em>MOVES</em>' + p.moves.map(function (m, i) {
+        var power = m.p > 1 ? 'PWR ' + m.p : 'status / special';
+        return '<br>' + (i + 1) + '. ' + esc(m.n) + ' - ' + esc(pretty(m.t)) + ', ' + power + ', ' + m.pp + ' PP';
+      }).join('');
+    } else {
+      mv = '<br><br><em>MOVES</em><br>Not known yet (shown after the trainer uses a command)';
+    }
+    if (me && me === owner) return head + mv + '<br><br><em>Press this Pokémon to remove it from your party</em>';
+    if (me) return head + mv;
+    return head + mv + '<br><br>Log in (button below the leaderboards) to manage your party';
   }
 
   function clickMon(el) {
@@ -2587,25 +2595,98 @@ const PAGE = `<!DOCTYPE html>
     releaseConfirm(el);
   }
 
-  (function wireParty() {
-    var tip = $('tip'), box = $('trainers');
+  // ---------- chat commands list ----------
+  var COMMANDS = [
+    { n: '!catch', s: 'Throw a Pokéball at the wild Pokémon',
+      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 60 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (15). Catching 3 of the same species merges them into its evolution.',
+      use: '!catch', ex: '!catch' },
+    { n: '!spawncheck / !wild', s: 'See the wild Pokémon right now',
+      what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
+      use: '!spawncheck  (or !wild)', ex: '!wild' },
+    { n: '!spawn', s: 'Summon a wild Pokémon (owner, mods, subs)',
+      what: 'Spawns a random Pokémon right away. Only the channel owner, moderators and subscribers can use it, only when no Pokémon is catchable, and each user has a 10 minute cooldown. It also delays the next automatic spawn by 5 minutes.',
+      use: '!spawn', ex: '!spawn' },
+    { n: '!party', s: 'List your Pokémon and slot numbers',
+      what: 'Shows every Pokémon you own with its slot number (max 15). The slot numbers are used by !info, !release, !trade and !battle. Shiny Pokémon have a star. You can also manage your party on this website.',
+      use: '!party  (or !party <page> if you have more than 15)', ex: '!party' },
+    { n: '!info', s: 'Stats and moves of one Pokémon',
+      what: 'Shows the level, type, stats (HP, ATK, DEF, SPD, SPC) and the 4 moves of the Pokémon in a slot, including move type, power and PP.',
+      use: '!info <slot number>', ex: '!info 1' },
+    { n: '!release', s: 'Release a Pokémon from your party',
+      what: 'Permanently removes the Pokémon in that slot from your party to free space. It cannot be undone, but the species stays in your Pokédex. You can also release Pokémon on this website by pressing them.',
+      use: '!release <slot number>', ex: '!release 3' },
+    { n: '!pokedex', s: 'Your Pokédex progress',
+      what: 'Shows how many different species you have found out of 151, the percentage, and your total number of catches.',
+      use: '!pokedex', ex: '!pokedex' },
+    { n: '!leaderboard', s: 'Top catchers and battle winners in chat',
+      what: 'Shows the top 3 trainers by catches and by battle wins. Add catches or wins to see only one of them. The full Top 10 lists are on this website.',
+      use: '!leaderboard  (or !leaderboard catches / !leaderboard wins)', ex: '!leaderboard wins' },
+    { n: '!trade', s: 'Offer a Pokémon to another trainer',
+      what: 'Offers the Pokémon in one of your slots to another trainer who has played before. They must answer with !accept and pick one of their own Pokémon to swap with you.',
+      use: '!trade @username <your slot>', ex: '!trade @ash 2' },
+    { n: '!accept', s: 'Accept a trade offer',
+      what: 'Accepts a trade someone offered you. You choose which of your Pokémon to give in exchange. Both trainers swap Pokémon right away and a trade can trigger evolutions.',
+      use: '!accept <your slot>', ex: '!accept 1' },
+    { n: '!battle', s: 'Challenge a trainer or accept a challenge',
+      what: 'Challenges another trainer with the Pokémon in your slot, or accepts a challenge you received. The other trainer has 5 minutes to accept. Battles use Pokémon Red and Blue rules at level 50 and last 5 minutes at most. When time runs out the Pokémon with more HP left wins.',
+      use: '!battle @username <your slot>', ex: '!battle @ash 1' },
+    { n: '!move', s: 'Pick your attack in a battle',
+      what: 'Every round both trainers choose a move within 30 seconds. If you do not choose, your Pokémon does not attack that round. The faster Pokémon moves first. Use it without a number to see your moves and their PP.',
+      use: '!move <1-4>', ex: '!move 2' },
+    { n: '!forfeit', s: 'Quit a battle or cancel a challenge',
+      what: 'Gives up your current battle so your opponent wins, or cancels a challenge nobody accepted yet.',
+      use: '!forfeit', ex: '!forfeit' },
+    { n: '!verify', s: 'Log in on this website',
+      what: 'Proves that you own your Kick account so you can manage your party on the website. Press the login button on the site, it gives you a code, then send it in chat. The code works for 5 minutes.',
+      use: '!verify <code>', ex: '!verify AB12CD' },
+    { n: '!help / !pokemon', s: 'Show the list of commands',
+      what: 'Posts a short list of every command and the website link in chat.',
+      use: '!help  (or !pokemon)', ex: '!help' }
+  ];
+
+  function renderCommands() {
+    $('cmds').innerHTML = COMMANDS.map(function (c, i) {
+      return '<div class="cmd" data-i="' + i + '"><b>' + esc(c.n) + '</b><span>' + esc(c.s) + '</span></div>';
+    }).join('');
+  }
+
+  function cmdTip(el) {
+    var c = COMMANDS[Number(el.getAttribute('data-i'))];
+    return '<b>' + esc(c.n) + '</b><br>' + esc(c.what) + '<br><br><em>HOW TO USE</em><br>' + esc(c.use) +
+      (c.ex ? '<br><br><em>EXAMPLE</em><br>' + esc(c.ex) : '');
+  }
+
+  // ---------- tooltips + party click ----------
+  (function wireTips() {
+    var tip = $('tip');
     function hide() { tip.style.display = 'none'; }
-    box.addEventListener('mousemove', function (e) {
-      var el = e.target.closest ? e.target.closest('.pm') : null;
-      if (!el) { hide(); return; }
-      tip.innerHTML = tipHtml(el);
+    function show(e, html, wide) {
+      tip.style.maxWidth = wide ? '360px' : '280px';
+      tip.innerHTML = html;
       tip.style.display = 'block';
       var x = Math.min(e.clientX + 16, window.innerWidth - tip.offsetWidth - 8);
       var y = e.clientY + 20;
       if (y + tip.offsetHeight > window.innerHeight - 8) y = e.clientY - tip.offsetHeight - 12;
       tip.style.left = Math.max(4, x) + 'px';
       tip.style.top = Math.max(4, y) + 'px';
+    }
+    var box = $('trainers'), cmds = $('cmds');
+    box.addEventListener('mousemove', function (e) {
+      var el = e.target.closest ? e.target.closest('.pm') : null;
+      if (!el) { hide(); return; }
+      show(e, tipHtml(el), false);
     });
     box.addEventListener('mouseleave', hide);
     box.addEventListener('click', function (e) {
       var el = e.target.closest ? e.target.closest('.pm') : null;
       if (el) { hide(); clickMon(el); }
     });
+    cmds.addEventListener('mousemove', function (e) {
+      var el = e.target.closest ? e.target.closest('.cmd') : null;
+      if (!el) { hide(); return; }
+      show(e, cmdTip(el), true);
+    });
+    cmds.addEventListener('mouseleave', hide);
     window.addEventListener('scroll', hide, true);
   })();
 
@@ -2637,45 +2718,52 @@ const PAGE = `<!DOCTYPE html>
     }, 30);
   }
 
-  function renderLeaderboard() {
-    var top = data.users.filter(function (u) { return u.totalCaught > 0; })
-      .sort(function (a, b) { return b.totalCaught - a.totalCaught || b.pokedex.length - a.pokedex.length; })
-      .slice(0, 10);
-    var max = top.length ? Math.max(1, top[0].totalCaught) : 1;
-    var first = prevCounts === null;
+  function renderBoard(elId, rows, valueOf) {
+    var max = rows.length ? Math.max(1, valueOf(rows[0])) : 1;
+    var first = prevBoards[elId] === undefined;
+    var prev = prevBoards[elId] || {};
     var medals = ['🥇', '🥈', '🥉'];
     var html = '';
     for (var i = 0; i < 10; i++) {
-      var u = top[i];
+      var u = rows[i];
       if (!u) {
-        html += '<div class="lb-row empty" style="--i:' + i + '"><span class="lb-rank">' + (i + 1) + '</span><span class="lb-name">- - - - -</span><div class="lb-bar"></div><span class="lb-count">0</span></div>';
+        html += '<div class="lb-row empty" style="--i:' + i + '"><span class="lb-rank">' + (i + 1) + '</span><div class="lb-mid"><span class="lb-name">- - - - -</span><div class="lb-bar"></div></div><span class="lb-count">0</span></div>';
         continue;
       }
-      var known = prevCounts && prevCounts[u.name] !== undefined;
-      var bump = !first && known && u.totalCaught > prevCounts[u.name];
-      var from = known ? prevCounts[u.name] : 0;
-      var pct = Math.max(3, (u.totalCaught / max) * 100);
+      var val = valueOf(u);
+      var known = prev[u.name] !== undefined;
+      var bump = !first && known && val > prev[u.name];
+      var from = known ? prev[u.name] : 0;
+      var pct = Math.max(3, (val / max) * 100);
       html += '<div class="lb-row r' + (i + 1) + (first ? ' enter' : '') + (bump ? ' bump' : '') + '" data-user="' + esc(u.name) + '" style="--i:' + i + '">' +
         '<span class="lb-rank">' + (i < 3 ? medals[i] : (i + 1)) + '</span>' +
-        '<span class="lb-name">@' + esc(u.name) + '</span>' +
-        '<div class="lb-bar"><i data-w="' + pct.toFixed(1) + '"></i></div>' +
-        '<span class="lb-count" data-from="' + from + '" data-to="' + u.totalCaught + '">' + from + '</span></div>';
+        '<div class="lb-mid"><span class="lb-name">@' + esc(u.name) + '</span><div class="lb-bar"><i data-w="' + pct.toFixed(1) + '"></i></div></div>' +
+        '<span class="lb-count" data-from="' + from + '" data-to="' + val + '">' + from + '</span></div>';
     }
-    $('lb').innerHTML = html;
+    $(elId).innerHTML = html;
 
     requestAnimationFrame(function () { requestAnimationFrame(function () {
-      Array.prototype.forEach.call(document.querySelectorAll('#lb .lb-bar i'), function (b) { b.style.width = b.getAttribute('data-w') + '%'; });
-      Array.prototype.forEach.call(document.querySelectorAll('#lb .lb-count'), function (c) {
+      Array.prototype.forEach.call(document.querySelectorAll('#' + elId + ' .lb-bar i'), function (b) { b.style.width = b.getAttribute('data-w') + '%'; });
+      Array.prototype.forEach.call(document.querySelectorAll('#' + elId + ' .lb-count'), function (c) {
         countUp(c, Number(c.getAttribute('data-from')), Number(c.getAttribute('data-to')));
       });
     }); });
 
-    Array.prototype.forEach.call(document.querySelectorAll('#lb .lb-row[data-user]'), function (r) {
+    Array.prototype.forEach.call(document.querySelectorAll('#' + elId + ' .lb-row[data-user]'), function (r) {
       r.onclick = function () { goToTrainer(r.getAttribute('data-user')); };
     });
 
-    prevCounts = {};
-    data.users.forEach(function (u) { prevCounts[u.name] = u.totalCaught; });
+    prevBoards[elId] = {};
+    data.users.forEach(function (u) { prevBoards[elId][u.name] = valueOf(u); });
+  }
+
+  function renderLeaderboard() {
+    var byCatch = data.users.filter(function (u) { return u.totalCaught > 0; })
+      .sort(function (a, b) { return b.totalCaught - a.totalCaught || b.pokedex.length - a.pokedex.length; });
+    var byWins = data.users.filter(function (u) { return u.battleWins > 0; })
+      .sort(function (a, b) { return b.battleWins - a.battleWins || b.totalCaught - a.totalCaught; });
+    renderBoard('lb', byCatch.slice(0, 10), function (u) { return u.totalCaught; });
+    renderBoard('lb2', byWins.slice(0, 10), function (u) { return u.battleWins; });
   }
 
   function goToTrainer(name) {
@@ -2757,6 +2845,7 @@ const PAGE = `<!DOCTYPE html>
 
   $('search').oninput = function () { if (data) renderTrainers(); };
   renderAuth();
+  renderCommands();
   load().then(restoreLogin);
   setInterval(load, 30000);
 </script>
