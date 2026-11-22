@@ -57,8 +57,8 @@ const CATCH_WINDOW_MS = 60 * 1000; // how long a spawned Pokémon can be caught 
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
 }
-const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
-const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
+const REDIRECT_URI = 'https://fuskas-pokemon.onrender.com/kick-callback';
+const POKEDEX_SITE = 'https://fuskas-pokemon.onrender.com/pokedex';
 const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 
 // Store temporary PKCE verifier in memory during login
@@ -1398,7 +1398,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'verify') {
     const code = (args[0] || '').toUpperCase();
-    if (!code) return `@${user} To log in on the website, open https://kicklet-pokemon.onrender.com/pokedex, press LOGIN, then type the code it shows here, e.g. !verify AB12CD`;
+    if (!code) return `@${user} To log in on the website, open https://fuskas-pokemon.onrender.com/pokedex, press LOGIN, then type the code it shows here, e.g. !verify AB12CD`;
     const entry = webLogins.get(code);
     if (!entry || entry.expires < Date.now() || entry.user !== user) return `@${user} That code is invalid or expired. Press LOGIN on the website to get a new one.`;
     entry.verified = true;
