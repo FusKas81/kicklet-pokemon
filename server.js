@@ -47,7 +47,7 @@ async function saveDB(doc) {
 }
 
 const POKEAPI = 'https://pokeapi.co/api/v2';
-const MAX_POKEMON_ID = 151; // Generation 1 only (Bulbasaur #1 - Mew #151)
+const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
 const MAX_INVENTORY = 15;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
@@ -190,30 +190,35 @@ app.get('/kick-callback', async (req, res) => {
 });
 
 // --- POKÉMON GAME LOGIC ---
-const GEN1 = {"mons":{"63":{"n":"ABRA","t":["psychic"],"s":[25,20,15,90,105],"m":["TELEPORT"],"l":[],"e":[64]},"142":{"n":"AERODACTYL","t":["rock","flying"],"s":[80,105,65,130,60],"m":["WING_ATTACK","AGILITY"],"l":[[33,"SUPERSONIC"],[38,"BITE"],[45,"TAKE_DOWN"],[54,"HYPER_BEAM"]],"e":[]},"65":{"n":"ALAKAZAM","t":["psychic"],"s":[55,50,45,120,135],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[]},"24":{"n":"ARBOK","t":["poison"],"s":[60,85,69,80,65],"m":["WRAP","LEER","POISON_STING"],"l":[[10,"POISON_STING"],[17,"BITE"],[27,"GLARE"],[36,"SCREECH"],[47,"ACID"]],"e":[]},"59":{"n":"ARCANINE","t":["fire"],"s":[90,110,80,95,80],"m":["ROAR","EMBER","LEER","TAKE_DOWN"],"l":[],"e":[]},"144":{"n":"ARTICUNO","t":["ice","flying"],"s":[90,85,100,85,125],"m":["PECK","ICE_BEAM"],"l":[[51,"BLIZZARD"],[55,"AGILITY"],[60,"MIST"]],"e":[]},"15":{"n":"BEEDRILL","t":["bug","poison"],"s":[65,80,40,75,45],"m":["FURY_ATTACK"],"l":[[12,"FURY_ATTACK"],[16,"FOCUS_ENERGY"],[20,"TWINEEDLE"],[25,"RAGE"],[30,"PIN_MISSILE"],[35,"AGILITY"]],"e":[]},"69":{"n":"BELLSPROUT","t":["grass","poison"],"s":[50,75,35,40,70],"m":["VINE_WHIP","GROWTH"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[21,"STUN_SPORE"],[26,"ACID"],[33,"RAZOR_LEAF"],[42,"SLAM"]],"e":[70]},"9":{"n":"BLASTOISE","t":["water"],"s":[79,83,100,78,85],"m":["TACKLE","TAIL_WHIP","BUBBLE","WATER_GUN"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[42,"SKULL_BASH"],[52,"HYDRO_PUMP"]],"e":[]},"1":{"n":"BULBASAUR","t":["grass","poison"],"s":[45,49,49,45,65],"m":["TACKLE","GROWL"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[20,"POISONPOWDER"],[27,"RAZOR_LEAF"],[34,"GROWTH"],[41,"SLEEP_POWDER"],[48,"SOLARBEAM"]],"e":[2]},"12":{"n":"BUTTERFREE","t":["bug","flying"],"s":[60,45,50,70,80],"m":["CONFUSION"],"l":[[12,"CONFUSION"],[15,"POISONPOWDER"],[16,"STUN_SPORE"],[17,"SLEEP_POWDER"],[21,"SUPERSONIC"],[26,"WHIRLWIND"],[32,"PSYBEAM"]],"e":[]},"10":{"n":"CATERPIE","t":["bug"],"s":[45,30,35,45,20],"m":["TACKLE","STRING_SHOT"],"l":[],"e":[11]},"113":{"n":"CHANSEY","t":["normal"],"s":[250,5,5,50,105],"m":["POUND","DOUBLESLAP"],"l":[[24,"SING"],[30,"GROWL"],[38,"MINIMIZE"],[44,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"],[54,"DOUBLE_EDGE"]],"e":[]},"6":{"n":"CHARIZARD","t":["fire","flying"],"s":[78,84,78,100,85],"m":["SCRATCH","GROWL","EMBER","LEER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[36,"SLASH"],[46,"FLAMETHROWER"],[55,"FIRE_SPIN"]],"e":[]},"4":{"n":"CHARMANDER","t":["fire"],"s":[39,52,43,65,50],"m":["SCRATCH","GROWL"],"l":[[9,"EMBER"],[15,"LEER"],[22,"RAGE"],[30,"SLASH"],[38,"FLAMETHROWER"],[46,"FIRE_SPIN"]],"e":[5]},"5":{"n":"CHARMELEON","t":["fire"],"s":[58,64,58,80,65],"m":["SCRATCH","GROWL","EMBER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[33,"SLASH"],[42,"FLAMETHROWER"],[56,"FIRE_SPIN"]],"e":[6]},"36":{"n":"CLEFABLE","t":["normal"],"s":[95,70,73,60,85],"m":["SING","DOUBLESLAP","MINIMIZE","METRONOME"],"l":[],"e":[]},"35":{"n":"CLEFAIRY","t":["normal"],"s":[70,45,48,35,60],"m":["POUND","GROWL"],"l":[[13,"SING"],[18,"DOUBLESLAP"],[24,"MINIMIZE"],[31,"METRONOME"],[39,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"]],"e":[36]},"91":{"n":"CLOYSTER","t":["water","ice"],"s":[50,95,180,70,85],"m":["WITHDRAW","SUPERSONIC","CLAMP","AURORA_BEAM"],"l":[[50,"SPIKE_CANNON"]],"e":[]},"104":{"n":"CUBONE","t":["ground"],"s":[50,50,95,35,40],"m":["BONE_CLUB","GROWL"],"l":[[25,"LEER"],[31,"FOCUS_ENERGY"],[38,"THRASH"],[43,"BONEMERANG"],[46,"RAGE"]],"e":[105]},"87":{"n":"DEWGONG","t":["water","ice"],"s":[90,70,80,70,95],"m":["HEADBUTT","GROWL","AURORA_BEAM"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[44,"REST"],[50,"TAKE_DOWN"],[56,"ICE_BEAM"]],"e":[]},"50":{"n":"DIGLETT","t":["ground"],"s":[10,55,25,95,45],"m":["SCRATCH"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[31,"SLASH"],[40,"EARTHQUAKE"]],"e":[51]},"132":{"n":"DITTO","t":["normal"],"s":[48,48,48,48,48],"m":["TRANSFORM"],"l":[],"e":[]},"85":{"n":"DODRIO","t":["normal","flying"],"s":[60,110,70,100,60],"m":["PECK","GROWL","FURY_ATTACK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[39,"RAGE"],[45,"TRI_ATTACK"],[51,"AGILITY"]],"e":[]},"84":{"n":"DODUO","t":["normal","flying"],"s":[35,85,45,75,35],"m":["PECK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[36,"RAGE"],[40,"TRI_ATTACK"],[44,"AGILITY"]],"e":[85]},"148":{"n":"DRAGONAIR","t":["dragon"],"s":[61,84,65,70,70],"m":["WRAP","LEER","THUNDER_WAVE"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[55,"HYPER_BEAM"]],"e":[149]},"149":{"n":"DRAGONITE","t":["dragon","flying"],"s":[91,134,95,80,100],"m":["WRAP","LEER","THUNDER_WAVE","AGILITY"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[60,"HYPER_BEAM"]],"e":[]},"147":{"n":"DRATINI","t":["dragon"],"s":[41,64,45,50,50],"m":["WRAP","LEER"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[30,"SLAM"],[40,"DRAGON_RAGE"],[50,"HYPER_BEAM"]],"e":[148]},"96":{"n":"DROWZEE","t":["psychic"],"s":[60,48,45,42,90],"m":["POUND","HYPNOSIS"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[29,"POISON_GAS"],[32,"PSYCHIC_M"],[37,"MEDITATE"]],"e":[97]},"51":{"n":"DUGTRIO","t":["ground"],"s":[35,80,50,120,70],"m":["SCRATCH","GROWL","DIG"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[35,"SLASH"],[47,"EARTHQUAKE"]],"e":[]},"133":{"n":"EEVEE","t":["normal"],"s":[55,55,50,55,65],"m":["TACKLE","SAND_ATTACK"],"l":[[27,"QUICK_ATTACK"],[31,"TAIL_WHIP"],[37,"BITE"],[45,"TAKE_DOWN"]],"e":[136,135,134]},"23":{"n":"EKANS","t":["poison"],"s":[35,60,44,55,40],"m":["WRAP","LEER"],"l":[[10,"POISON_STING"],[17,"BITE"],[24,"GLARE"],[31,"SCREECH"],[38,"ACID"]],"e":[24]},"125":{"n":"ELECTABUZZ","t":["electric"],"s":[65,83,57,105,85],"m":["QUICK_ATTACK","LEER"],"l":[[34,"THUNDERSHOCK"],[37,"SCREECH"],[42,"THUNDERPUNCH"],[49,"LIGHT_SCREEN"],[54,"THUNDER"]],"e":[]},"101":{"n":"ELECTRODE","t":["electric"],"s":[60,50,70,140,80],"m":["TACKLE","SCREECH","SONICBOOM"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[40,"SWIFT"],[50,"EXPLOSION"]],"e":[]},"102":{"n":"EXEGGCUTE","t":["grass","psychic"],"s":[60,40,80,40,60],"m":["BARRAGE","HYPNOSIS"],"l":[[25,"REFLECT"],[28,"LEECH_SEED"],[32,"STUN_SPORE"],[37,"POISONPOWDER"],[42,"SOLARBEAM"],[48,"SLEEP_POWDER"]],"e":[103]},"103":{"n":"EXEGGUTOR","t":["grass","psychic"],"s":[95,95,85,55,125],"m":["BARRAGE","HYPNOSIS"],"l":[[28,"STOMP"]],"e":[]},"83":{"n":"FARFETCHD","t":["normal","flying"],"s":[52,65,55,60,58],"m":["PECK","SAND_ATTACK"],"l":[[7,"LEER"],[15,"FURY_ATTACK"],[23,"SWORDS_DANCE"],[31,"AGILITY"],[39,"SLASH"]],"e":[]},"22":{"n":"FEAROW","t":["normal","flying"],"s":[65,90,65,100,61],"m":["PECK","GROWL","LEER"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[25,"MIRROR_MOVE"],[34,"DRILL_PECK"],[43,"AGILITY"]],"e":[]},"136":{"n":"FLAREON","t":["fire"],"s":[65,130,60,65,110],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","EMBER"],"l":[[27,"QUICK_ATTACK"],[31,"EMBER"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"LEER"],[44,"FIRE_SPIN"],[48,"RAGE"],[54,"FLAMETHROWER"]],"e":[]},"92":{"n":"GASTLY","t":["ghost","poison"],"s":[30,35,30,80,100],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[27,"HYPNOSIS"],[35,"DREAM_EATER"]],"e":[93]},"94":{"n":"GENGAR","t":["ghost","poison"],"s":[60,65,60,110,130],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[]},"74":{"n":"GEODUDE","t":["rock","ground"],"s":[40,80,100,20,30],"m":["TACKLE"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[26,"HARDEN"],[31,"EARTHQUAKE"],[36,"EXPLOSION"]],"e":[75]},"44":{"n":"GLOOM","t":["grass","poison"],"s":[60,65,70,40,85],"m":["ABSORB","POISONPOWDER","STUN_SPORE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[28,"ACID"],[38,"PETAL_DANCE"],[52,"SOLARBEAM"]],"e":[45]},"42":{"n":"GOLBAT","t":["poison","flying"],"s":[75,80,70,90,75],"m":["LEECH_LIFE","SCREECH","BITE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[32,"WING_ATTACK"],[43,"HAZE"]],"e":[]},"118":{"n":"GOLDEEN","t":["water"],"s":[45,67,60,63,50],"m":["PECK","TAIL_WHIP"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[37,"WATERFALL"],[45,"HORN_DRILL"],[54,"AGILITY"]],"e":[119]},"55":{"n":"GOLDUCK","t":["water"],"s":[80,82,78,85,80],"m":["SCRATCH","TAIL_WHIP","DISABLE"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[39,"CONFUSION"],[48,"FURY_SWIPES"],[59,"HYDRO_PUMP"]],"e":[]},"76":{"n":"GOLEM","t":["rock","ground"],"s":[80,110,130,45,55],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[]},"75":{"n":"GRAVELER","t":["rock","ground"],"s":[55,95,115,35,45],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[76]},"88":{"n":"GRIMER","t":["poison"],"s":[80,80,50,25,40],"m":["POUND","DISABLE"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[42,"HARDEN"],[48,"SCREECH"],[55,"ACID_ARMOR"]],"e":[89]},"58":{"n":"GROWLITHE","t":["fire"],"s":[55,70,45,60,50],"m":["BITE","ROAR"],"l":[[18,"EMBER"],[23,"LEER"],[30,"TAKE_DOWN"],[39,"AGILITY"],[50,"FLAMETHROWER"]],"e":[59]},"130":{"n":"GYARADOS","t":["water","flying"],"s":[95,125,79,81,100],"m":["BITE","DRAGON_RAGE","LEER","HYDRO_PUMP"],"l":[[20,"BITE"],[25,"DRAGON_RAGE"],[32,"LEER"],[41,"HYDRO_PUMP"],[52,"HYPER_BEAM"]],"e":[]},"93":{"n":"HAUNTER","t":["ghost","poison"],"s":[45,50,45,95,115],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[94]},"107":{"n":"HITMONCHAN","t":["fighting"],"s":[50,105,79,76,35],"m":["COMET_PUNCH","AGILITY"],"l":[[33,"FIRE_PUNCH"],[38,"ICE_PUNCH"],[43,"THUNDERPUNCH"],[48,"MEGA_PUNCH"],[53,"COUNTER"]],"e":[]},"106":{"n":"HITMONLEE","t":["fighting"],"s":[50,120,53,87,35],"m":["DOUBLE_KICK","MEDITATE"],"l":[[33,"ROLLING_KICK"],[38,"JUMP_KICK"],[43,"FOCUS_ENERGY"],[48,"HI_JUMP_KICK"],[53,"MEGA_KICK"]],"e":[]},"116":{"n":"HORSEA","t":["water"],"s":[30,40,70,60,70],"m":["BUBBLE"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[37,"AGILITY"],[45,"HYDRO_PUMP"]],"e":[117]},"97":{"n":"HYPNO","t":["psychic"],"s":[85,73,70,67,115],"m":["POUND","HYPNOSIS","DISABLE","CONFUSION"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[33,"POISON_GAS"],[37,"PSYCHIC_M"],[43,"MEDITATE"]],"e":[]},"2":{"n":"IVYSAUR","t":["grass","poison"],"s":[60,62,63,60,80],"m":["TACKLE","GROWL","LEECH_SEED"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[38,"GROWTH"],[46,"SLEEP_POWDER"],[54,"SOLARBEAM"]],"e":[3]},"39":{"n":"JIGGLYPUFF","t":["normal"],"s":[115,45,20,20,25],"m":["SING"],"l":[[9,"POUND"],[14,"DISABLE"],[19,"DEFENSE_CURL"],[24,"DOUBLESLAP"],[29,"REST"],[34,"BODY_SLAM"],[39,"DOUBLE_EDGE"]],"e":[40]},"135":{"n":"JOLTEON","t":["electric"],"s":[65,65,60,130,110],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","THUNDERSHOCK"],"l":[[27,"QUICK_ATTACK"],[31,"THUNDERSHOCK"],[37,"TAIL_WHIP"],[40,"THUNDER_WAVE"],[42,"DOUBLE_KICK"],[44,"AGILITY"],[48,"PIN_MISSILE"],[54,"THUNDER"]],"e":[]},"124":{"n":"JYNX","t":["ice","psychic"],"s":[65,50,35,95,95],"m":["POUND","LOVELY_KISS"],"l":[[18,"LICK"],[23,"DOUBLESLAP"],[31,"ICE_PUNCH"],[39,"BODY_SLAM"],[47,"THRASH"],[58,"BLIZZARD"]],"e":[]},"140":{"n":"KABUTO","t":["rock","water"],"s":[30,80,90,55,45],"m":["SCRATCH","HARDEN"],"l":[[34,"ABSORB"],[39,"SLASH"],[44,"LEER"],[49,"HYDRO_PUMP"]],"e":[141]},"141":{"n":"KABUTOPS","t":["rock","water"],"s":[60,115,105,80,70],"m":["SCRATCH","HARDEN","ABSORB"],"l":[[34,"ABSORB"],[39,"SLASH"],[46,"LEER"],[53,"HYDRO_PUMP"]],"e":[]},"64":{"n":"KADABRA","t":["psychic"],"s":[40,35,30,105,120],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[65]},"14":{"n":"KAKUNA","t":["bug","poison"],"s":[45,25,50,35,25],"m":["HARDEN"],"l":[],"e":[15]},"115":{"n":"KANGASKHAN","t":["normal"],"s":[105,95,80,90,40],"m":["COMET_PUNCH","RAGE"],"l":[[26,"BITE"],[31,"TAIL_WHIP"],[36,"MEGA_PUNCH"],[41,"LEER"],[46,"DIZZY_PUNCH"]],"e":[]},"99":{"n":"KINGLER","t":["water"],"s":[55,130,115,75,50],"m":["BUBBLE","LEER","VICEGRIP"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[34,"STOMP"],[42,"CRABHAMMER"],[49,"HARDEN"]],"e":[]},"109":{"n":"KOFFING","t":["poison"],"s":[40,65,95,35,60],"m":["TACKLE","SMOG"],"l":[[32,"SLUDGE"],[37,"SMOKESCREEN"],[40,"SELFDESTRUCT"],[45,"HAZE"],[48,"EXPLOSION"]],"e":[110]},"98":{"n":"KRABBY","t":["water"],"s":[30,105,90,50,25],"m":["BUBBLE","LEER"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[30,"STOMP"],[35,"CRABHAMMER"],[40,"HARDEN"]],"e":[99]},"131":{"n":"LAPRAS","t":["water","ice"],"s":[130,85,80,60,95],"m":["WATER_GUN","GROWL"],"l":[[16,"SING"],[20,"MIST"],[25,"BODY_SLAM"],[31,"CONFUSE_RAY"],[38,"ICE_BEAM"],[46,"HYDRO_PUMP"]],"e":[]},"108":{"n":"LICKITUNG","t":["normal"],"s":[90,55,75,30,60],"m":["WRAP","SUPERSONIC"],"l":[[7,"STOMP"],[15,"DISABLE"],[23,"DEFENSE_CURL"],[31,"SLAM"],[39,"SCREECH"]],"e":[]},"68":{"n":"MACHAMP","t":["fighting"],"s":[90,130,80,55,65],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[]},"67":{"n":"MACHOKE","t":["fighting"],"s":[80,100,70,45,50],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[68]},"66":{"n":"MACHOP","t":["fighting"],"s":[70,80,50,35,35],"m":["KARATE_CHOP"],"l":[[20,"LOW_KICK"],[25,"LEER"],[32,"FOCUS_ENERGY"],[39,"SEISMIC_TOSS"],[46,"SUBMISSION"]],"e":[67]},"129":{"n":"MAGIKARP","t":["water"],"s":[20,10,55,80,20],"m":["SPLASH"],"l":[[15,"TACKLE"]],"e":[130]},"126":{"n":"MAGMAR","t":["fire"],"s":[65,95,57,93,85],"m":["EMBER"],"l":[[36,"LEER"],[39,"CONFUSE_RAY"],[43,"FIRE_PUNCH"],[48,"SMOKESCREEN"],[52,"SMOG"],[55,"FLAMETHROWER"]],"e":[]},"81":{"n":"MAGNEMITE","t":["electric"],"s":[25,35,70,45,95],"m":["TACKLE"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[35,"THUNDER_WAVE"],[41,"SWIFT"],[47,"SCREECH"]],"e":[82]},"82":{"n":"MAGNETON","t":["electric"],"s":[50,60,95,70,120],"m":["TACKLE","SONICBOOM","THUNDERSHOCK"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[38,"THUNDER_WAVE"],[46,"SWIFT"],[54,"SCREECH"]],"e":[]},"56":{"n":"MANKEY","t":["fighting"],"s":[40,80,35,70,35],"m":["SCRATCH","LEER"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[33,"SEISMIC_TOSS"],[39,"THRASH"]],"e":[57]},"105":{"n":"MAROWAK","t":["ground"],"s":[60,80,110,45,50],"m":["BONE_CLUB","GROWL","LEER","FOCUS_ENERGY"],"l":[[25,"LEER"],[33,"FOCUS_ENERGY"],[41,"THRASH"],[48,"BONEMERANG"],[55,"RAGE"]],"e":[]},"52":{"n":"MEOWTH","t":["normal"],"s":[40,45,35,90,40],"m":["SCRATCH","GROWL"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[33,"FURY_SWIPES"],[44,"SLASH"]],"e":[53]},"11":{"n":"METAPOD","t":["bug"],"s":[50,20,55,30,25],"m":["HARDEN"],"l":[],"e":[12]},"151":{"n":"MEW","t":["psychic"],"s":[100,100,100,100,100],"m":["POUND"],"l":[[10,"TRANSFORM"],[20,"MEGA_PUNCH"],[30,"METRONOME"],[40,"PSYCHIC_M"]],"e":[]},"150":{"n":"MEWTWO","t":["psychic"],"s":[106,110,90,130,154],"m":["CONFUSION","DISABLE","SWIFT","PSYCHIC_M"],"l":[[63,"BARRIER"],[66,"PSYCHIC_M"],[70,"RECOVER"],[75,"MIST"],[81,"AMNESIA"]],"e":[]},"146":{"n":"MOLTRES","t":["fire","flying"],"s":[90,100,90,90,125],"m":["PECK","FIRE_SPIN"],"l":[[51,"LEER"],[55,"AGILITY"],[60,"SKY_ATTACK"]],"e":[]},"122":{"n":"MR-MIME","t":["psychic"],"s":[40,45,65,90,100],"m":["CONFUSION","BARRIER"],"l":[[15,"CONFUSION"],[23,"LIGHT_SCREEN"],[31,"DOUBLESLAP"],[39,"MEDITATE"],[47,"SUBSTITUTE"]],"e":[]},"89":{"n":"MUK","t":["poison"],"s":[105,105,75,50,65],"m":["POUND","DISABLE","POISON_GAS"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[45,"HARDEN"],[53,"SCREECH"],[60,"ACID_ARMOR"]],"e":[]},"34":{"n":"NIDOKING","t":["poison","ground"],"s":[81,92,77,85,75],"m":["TACKLE","HORN_ATTACK","POISON_STING","THRASH"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"THRASH"]],"e":[]},"31":{"n":"NIDOQUEEN","t":["poison","ground"],"s":[90,82,87,76,75],"m":["TACKLE","SCRATCH","TAIL_WHIP","BODY_SLAM"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"BODY_SLAM"]],"e":[]},"29":{"n":"NIDORAN-F","t":["poison"],"s":[55,47,52,41,40],"m":["GROWL","TACKLE"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[21,"TAIL_WHIP"],[29,"BITE"],[36,"FURY_SWIPES"],[43,"DOUBLE_KICK"]],"e":[30]},"32":{"n":"NIDORAN-M","t":["poison"],"s":[46,57,40,50,40],"m":["LEER","TACKLE"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[21,"FOCUS_ENERGY"],[29,"FURY_ATTACK"],[36,"HORN_DRILL"],[43,"DOUBLE_KICK"]],"e":[33]},"30":{"n":"NIDORINA","t":["poison"],"s":[70,62,67,56,55],"m":["GROWL","TACKLE","SCRATCH"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"TAIL_WHIP"],[32,"BITE"],[41,"FURY_SWIPES"],[50,"DOUBLE_KICK"]],"e":[31]},"33":{"n":"NIDORINO","t":["poison"],"s":[61,72,57,65,55],"m":["LEER","TACKLE","HORN_ATTACK"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"FOCUS_ENERGY"],[32,"FURY_ATTACK"],[41,"HORN_DRILL"],[50,"DOUBLE_KICK"]],"e":[34]},"38":{"n":"NINETALES","t":["fire"],"s":[73,76,75,100,100],"m":["EMBER","TAIL_WHIP","QUICK_ATTACK","ROAR"],"l":[],"e":[]},"43":{"n":"ODDISH","t":["grass","poison"],"s":[45,50,55,30,75],"m":["ABSORB"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[24,"ACID"],[33,"PETAL_DANCE"],[46,"SOLARBEAM"]],"e":[44]},"138":{"n":"OMANYTE","t":["rock","water"],"s":[35,40,100,35,90],"m":["WATER_GUN","WITHDRAW"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[46,"SPIKE_CANNON"],[53,"HYDRO_PUMP"]],"e":[139]},"139":{"n":"OMASTAR","t":["rock","water"],"s":[70,60,125,55,115],"m":["WATER_GUN","WITHDRAW","HORN_ATTACK"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[44,"SPIKE_CANNON"],[49,"HYDRO_PUMP"]],"e":[]},"95":{"n":"ONIX","t":["rock","ground"],"s":[35,45,160,70,30],"m":["TACKLE","SCREECH"],"l":[[15,"BIND"],[19,"ROCK_THROW"],[25,"RAGE"],[33,"SLAM"],[43,"HARDEN"]],"e":[]},"46":{"n":"PARAS","t":["bug","grass"],"s":[35,70,55,25,55],"m":["SCRATCH"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[27,"SPORE"],[34,"SLASH"],[41,"GROWTH"]],"e":[47]},"47":{"n":"PARASECT","t":["bug","grass"],"s":[60,95,80,30,80],"m":["SCRATCH","STUN_SPORE","LEECH_LIFE"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[30,"SPORE"],[39,"SLASH"],[48,"GROWTH"]],"e":[]},"53":{"n":"PERSIAN","t":["normal"],"s":[65,70,60,115,65],"m":["SCRATCH","GROWL","BITE","SCREECH"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[37,"FURY_SWIPES"],[51,"SLASH"]],"e":[]},"18":{"n":"PIDGEOT","t":["normal","flying"],"s":[83,80,75,91,70],"m":["GUST","SAND_ATTACK","QUICK_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[44,"AGILITY"],[54,"MIRROR_MOVE"]],"e":[]},"17":{"n":"PIDGEOTTO","t":["normal","flying"],"s":[63,60,55,71,50],"m":["GUST","SAND_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[40,"AGILITY"],[49,"MIRROR_MOVE"]],"e":[18]},"16":{"n":"PIDGEY","t":["normal","flying"],"s":[40,45,40,56,35],"m":["GUST"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[19,"WHIRLWIND"],[28,"WING_ATTACK"],[36,"AGILITY"],[44,"MIRROR_MOVE"]],"e":[17]},"25":{"n":"PIKACHU","t":["electric"],"s":[35,55,30,90,50],"m":["THUNDERSHOCK","GROWL"],"l":[[9,"THUNDER_WAVE"],[16,"QUICK_ATTACK"],[26,"SWIFT"],[33,"AGILITY"],[43,"THUNDER"]],"e":[26]},"127":{"n":"PINSIR","t":["bug"],"s":[65,125,100,85,55],"m":["VICEGRIP"],"l":[[25,"SEISMIC_TOSS"],[30,"GUILLOTINE"],[36,"FOCUS_ENERGY"],[43,"HARDEN"],[49,"SLASH"],[54,"SWORDS_DANCE"]],"e":[]},"60":{"n":"POLIWAG","t":["water"],"s":[40,50,40,90,40],"m":["BUBBLE"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[25,"DOUBLESLAP"],[31,"BODY_SLAM"],[38,"AMNESIA"],[45,"HYDRO_PUMP"]],"e":[61]},"61":{"n":"POLIWHIRL","t":["water"],"s":[65,65,65,90,50],"m":["BUBBLE","HYPNOSIS","WATER_GUN"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[26,"DOUBLESLAP"],[33,"BODY_SLAM"],[41,"AMNESIA"],[49,"HYDRO_PUMP"]],"e":[62]},"62":{"n":"POLIWRATH","t":["water","fighting"],"s":[90,85,95,70,70],"m":["HYPNOSIS","WATER_GUN","DOUBLESLAP","BODY_SLAM"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"]],"e":[]},"77":{"n":"PONYTA","t":["fire"],"s":[50,85,55,90,65],"m":["EMBER"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[43,"TAKE_DOWN"],[48,"AGILITY"]],"e":[78]},"137":{"n":"PORYGON","t":["normal"],"s":[65,60,70,40,75],"m":["TACKLE","SHARPEN","CONVERSION"],"l":[[23,"PSYBEAM"],[28,"RECOVER"],[35,"AGILITY"],[42,"TRI_ATTACK"]],"e":[]},"57":{"n":"PRIMEAPE","t":["fighting"],"s":[65,105,60,95,60],"m":["SCRATCH","LEER","KARATE_CHOP","FURY_SWIPES"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[37,"SEISMIC_TOSS"],[46,"THRASH"]],"e":[]},"54":{"n":"PSYDUCK","t":["water"],"s":[50,52,48,55,50],"m":["SCRATCH"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[36,"CONFUSION"],[43,"FURY_SWIPES"],[52,"HYDRO_PUMP"]],"e":[55]},"26":{"n":"RAICHU","t":["electric"],"s":[60,90,55,100,90],"m":["THUNDERSHOCK","GROWL","THUNDER_WAVE"],"l":[],"e":[]},"78":{"n":"RAPIDASH","t":["fire"],"s":[65,100,70,105,80],"m":["EMBER","TAIL_WHIP","STOMP","GROWL"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[47,"TAKE_DOWN"],[55,"AGILITY"]],"e":[]},"20":{"n":"RATICATE","t":["normal"],"s":[55,81,60,97,50],"m":["TACKLE","TAIL_WHIP","QUICK_ATTACK"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[27,"FOCUS_ENERGY"],[41,"SUPER_FANG"]],"e":[]},"19":{"n":"RATTATA","t":["normal"],"s":[30,56,35,72,25],"m":["TACKLE","TAIL_WHIP"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[23,"FOCUS_ENERGY"],[34,"SUPER_FANG"]],"e":[20]},"112":{"n":"RHYDON","t":["ground","rock"],"s":[105,130,120,40,45],"m":["HORN_ATTACK","STOMP","TAIL_WHIP","FURY_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[48,"HORN_DRILL"],[55,"LEER"],[64,"TAKE_DOWN"]],"e":[]},"111":{"n":"RHYHORN","t":["ground","rock"],"s":[80,85,95,25,30],"m":["HORN_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[45,"HORN_DRILL"],[50,"LEER"],[55,"TAKE_DOWN"]],"e":[112]},"27":{"n":"SANDSHREW","t":["ground"],"s":[50,75,85,40,30],"m":["SCRATCH"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[24,"POISON_STING"],[31,"SWIFT"],[38,"FURY_SWIPES"]],"e":[28]},"28":{"n":"SANDSLASH","t":["ground"],"s":[75,100,110,65,55],"m":["SCRATCH","SAND_ATTACK"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[27,"POISON_STING"],[36,"SWIFT"],[47,"FURY_SWIPES"]],"e":[]},"123":{"n":"SCYTHER","t":["bug","flying"],"s":[70,110,80,105,55],"m":["QUICK_ATTACK"],"l":[[17,"LEER"],[20,"FOCUS_ENERGY"],[24,"DOUBLE_TEAM"],[29,"SLASH"],[35,"SWORDS_DANCE"],[42,"AGILITY"]],"e":[]},"117":{"n":"SEADRA","t":["water"],"s":[55,65,95,85,95],"m":["BUBBLE","SMOKESCREEN"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[41,"AGILITY"],[52,"HYDRO_PUMP"]],"e":[]},"119":{"n":"SEAKING","t":["water"],"s":[80,92,65,68,80],"m":["PECK","TAIL_WHIP","SUPERSONIC"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[39,"WATERFALL"],[48,"HORN_DRILL"],[54,"AGILITY"]],"e":[]},"86":{"n":"SEEL","t":["water"],"s":[65,45,55,45,70],"m":["HEADBUTT"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[40,"REST"],[45,"TAKE_DOWN"],[50,"ICE_BEAM"]],"e":[87]},"90":{"n":"SHELLDER","t":["water"],"s":[30,65,100,40,45],"m":["TACKLE","WITHDRAW"],"l":[[18,"SUPERSONIC"],[23,"CLAMP"],[30,"AURORA_BEAM"],[39,"LEER"],[50,"ICE_BEAM"]],"e":[91]},"80":{"n":"SLOWBRO","t":["water","psychic"],"s":[95,75,110,30,80],"m":["CONFUSION","DISABLE","HEADBUTT"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[37,"WITHDRAW"],[44,"AMNESIA"],[55,"PSYCHIC_M"]],"e":[]},"79":{"n":"SLOWPOKE","t":["water","psychic"],"s":[90,65,65,15,40],"m":["CONFUSION"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[40,"AMNESIA"],[48,"PSYCHIC_M"]],"e":[80]},"143":{"n":"SNORLAX","t":["normal"],"s":[160,110,65,30,65],"m":["HEADBUTT","AMNESIA","REST"],"l":[[35,"BODY_SLAM"],[41,"HARDEN"],[48,"DOUBLE_EDGE"],[56,"HYPER_BEAM"]],"e":[]},"21":{"n":"SPEAROW","t":["normal","flying"],"s":[40,60,30,70,31],"m":["PECK","GROWL"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[22,"MIRROR_MOVE"],[29,"DRILL_PECK"],[36,"AGILITY"]],"e":[22]},"7":{"n":"SQUIRTLE","t":["water"],"s":[44,48,65,43,50],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[22,"BITE"],[28,"WITHDRAW"],[35,"SKULL_BASH"],[42,"HYDRO_PUMP"]],"e":[8]},"121":{"n":"STARMIE","t":["water","psychic"],"s":[60,75,85,115,100],"m":["TACKLE","WATER_GUN","HARDEN"],"l":[],"e":[]},"120":{"n":"STARYU","t":["water"],"s":[30,45,55,85,70],"m":["TACKLE"],"l":[[17,"WATER_GUN"],[22,"HARDEN"],[27,"RECOVER"],[32,"SWIFT"],[37,"MINIMIZE"],[42,"LIGHT_SCREEN"],[47,"HYDRO_PUMP"]],"e":[121]},"114":{"n":"TANGELA","t":["grass"],"s":[65,55,115,60,100],"m":["CONSTRICT","BIND"],"l":[[29,"ABSORB"],[32,"POISONPOWDER"],[36,"STUN_SPORE"],[39,"SLEEP_POWDER"],[45,"SLAM"],[49,"GROWTH"]],"e":[]},"128":{"n":"TAUROS","t":["normal"],"s":[75,100,95,110,70],"m":["TACKLE"],"l":[[21,"STOMP"],[28,"TAIL_WHIP"],[35,"LEER"],[44,"RAGE"],[51,"TAKE_DOWN"]],"e":[]},"72":{"n":"TENTACOOL","t":["water","poison"],"s":[40,40,35,70,100],"m":["ACID"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[33,"BARRIER"],[40,"SCREECH"],[48,"HYDRO_PUMP"]],"e":[73]},"73":{"n":"TENTACRUEL","t":["water","poison"],"s":[80,70,65,100,120],"m":["ACID","SUPERSONIC","WRAP"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[35,"BARRIER"],[43,"SCREECH"],[50,"HYDRO_PUMP"]],"e":[]},"134":{"n":"VAPOREON","t":["water"],"s":[130,65,60,65,110],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","WATER_GUN"],"l":[[27,"QUICK_ATTACK"],[31,"WATER_GUN"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"ACID_ARMOR"],[44,"HAZE"],[48,"MIST"],[54,"HYDRO_PUMP"]],"e":[]},"49":{"n":"VENOMOTH","t":["bug","poison"],"s":[70,65,60,90,90],"m":["TACKLE","DISABLE","POISONPOWDER","LEECH_LIFE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[38,"PSYBEAM"],[43,"SLEEP_POWDER"],[50,"PSYCHIC_M"]],"e":[]},"48":{"n":"VENONAT","t":["bug","poison"],"s":[60,55,50,45,40],"m":["TACKLE","DISABLE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[35,"PSYBEAM"],[38,"SLEEP_POWDER"],[43,"PSYCHIC_M"]],"e":[49]},"3":{"n":"VENUSAUR","t":["grass","poison"],"s":[80,82,83,80,100],"m":["TACKLE","GROWL","LEECH_SEED","VINE_WHIP"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[43,"GROWTH"],[55,"SLEEP_POWDER"],[65,"SOLARBEAM"]],"e":[]},"71":{"n":"VICTREEBEL","t":["grass","poison"],"s":[80,105,65,70,100],"m":["SLEEP_POWDER","STUN_SPORE","ACID","RAZOR_LEAF"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"]],"e":[]},"45":{"n":"VILEPLUME","t":["grass","poison"],"s":[75,80,85,50,100],"m":["STUN_SPORE","SLEEP_POWDER","ACID","PETAL_DANCE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"]],"e":[]},"100":{"n":"VOLTORB","t":["electric"],"s":[40,30,50,100,55],"m":["TACKLE","SCREECH"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[36,"SWIFT"],[43,"EXPLOSION"]],"e":[101]},"37":{"n":"VULPIX","t":["fire"],"s":[38,41,40,65,65],"m":["EMBER","TAIL_WHIP"],"l":[[16,"QUICK_ATTACK"],[21,"ROAR"],[28,"CONFUSE_RAY"],[35,"FLAMETHROWER"],[42,"FIRE_SPIN"]],"e":[38]},"8":{"n":"WARTORTLE","t":["water"],"s":[59,63,80,58,65],"m":["TACKLE","TAIL_WHIP","BUBBLE"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[39,"SKULL_BASH"],[47,"HYDRO_PUMP"]],"e":[9]},"13":{"n":"WEEDLE","t":["bug","poison"],"s":[40,35,30,50,20],"m":["POISON_STING","STRING_SHOT"],"l":[],"e":[14]},"70":{"n":"WEEPINBELL","t":["grass","poison"],"s":[65,90,50,55,85],"m":["VINE_WHIP","GROWTH","WRAP"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[23,"STUN_SPORE"],[29,"ACID"],[38,"RAZOR_LEAF"],[49,"SLAM"]],"e":[71]},"110":{"n":"WEEZING","t":["poison"],"s":[65,90,120,60,85],"m":["TACKLE","SMOG","SLUDGE"],"l":[[32,"SLUDGE"],[39,"SMOKESCREEN"],[43,"SELFDESTRUCT"],[49,"HAZE"],[53,"EXPLOSION"]],"e":[]},"40":{"n":"WIGGLYTUFF","t":["normal"],"s":[140,70,45,45,50],"m":["SING","DISABLE","DEFENSE_CURL","DOUBLESLAP"],"l":[],"e":[]},"145":{"n":"ZAPDOS","t":["electric","flying"],"s":[90,90,85,100,125],"m":["THUNDERSHOCK","DRILL_PECK"],"l":[[51,"THUNDER"],[55,"AGILITY"],[60,"LIGHT_SCREEN"]],"e":[]},"41":{"n":"ZUBAT","t":["poison","flying"],"s":[40,45,35,55,40],"m":["LEECH_LIFE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[28,"WING_ATTACK"],[36,"HAZE"]],"e":[42]}},"moves":{"POUND":{"n":"POUND","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"KARATE_CHOP":{"n":"KARATE CHOP","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"normal","a":100,"pp":25},"DOUBLESLAP":{"n":"DOUBLESLAP","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":10},"COMET_PUNCH":{"n":"COMET PUNCH","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":85,"pp":15},"MEGA_PUNCH":{"n":"MEGA PUNCH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":85,"pp":20},"PAY_DAY":{"n":"PAY DAY","e":"PAY_DAY_EFFECT","p":40,"t":"normal","a":100,"pp":20},"FIRE_PUNCH":{"n":"FIRE PUNCH","e":"BURN_SIDE_EFFECT1","p":75,"t":"fire","a":100,"pp":15},"ICE_PUNCH":{"n":"ICE PUNCH","e":"FREEZE_SIDE_EFFECT1","p":75,"t":"ice","a":100,"pp":15},"THUNDERPUNCH":{"n":"THUNDERPUNCH","e":"PARALYZE_SIDE_EFFECT1","p":75,"t":"electric","a":100,"pp":15},"SCRATCH":{"n":"SCRATCH","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"VICEGRIP":{"n":"VICEGRIP","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"normal","a":100,"pp":30},"GUILLOTINE":{"n":"GUILLOTINE","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"RAZOR_WIND":{"n":"RAZOR WIND","e":"CHARGE_EFFECT","p":80,"t":"normal","a":75,"pp":10},"SWORDS_DANCE":{"n":"SWORDS DANCE","e":"ATTACK_UP2_EFFECT","p":0,"t":"normal","a":100,"pp":30},"CUT":{"n":"CUT","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"normal","a":95,"pp":30},"GUST":{"n":"GUST","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"WING_ATTACK":{"n":"WING ATTACK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"WHIRLWIND":{"n":"WHIRLWIND","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":85,"pp":20},"FLY":{"n":"FLY","e":"FLY_EFFECT","p":70,"t":"flying","a":95,"pp":15},"BIND":{"n":"BIND","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":75,"pp":20},"SLAM":{"n":"SLAM","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":75,"pp":20},"VINE_WHIP":{"n":"VINE WHIP","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"grass","a":100,"pp":10},"STOMP":{"n":"STOMP","e":"FLINCH_SIDE_EFFECT2","p":65,"t":"normal","a":100,"pp":20},"DOUBLE_KICK":{"n":"DOUBLE KICK","e":"ATTACK_TWICE_EFFECT","p":30,"t":"fighting","a":100,"pp":30},"MEGA_KICK":{"n":"MEGA KICK","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"normal","a":75,"pp":5},"JUMP_KICK":{"n":"JUMP KICK","e":"JUMP_KICK_EFFECT","p":70,"t":"fighting","a":95,"pp":25},"ROLLING_KICK":{"n":"ROLLING KICK","e":"FLINCH_SIDE_EFFECT2","p":60,"t":"fighting","a":85,"pp":15},"SAND_ATTACK":{"n":"SAND-ATTACK","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":15},"HEADBUTT":{"n":"HEADBUTT","e":"FLINCH_SIDE_EFFECT2","p":70,"t":"normal","a":100,"pp":15},"HORN_ATTACK":{"n":"HORN ATTACK","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"normal","a":100,"pp":25},"FURY_ATTACK":{"n":"FURY ATTACK","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"HORN_DRILL":{"n":"HORN DRILL","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"TACKLE":{"n":"TACKLE","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"normal","a":95,"pp":35},"BODY_SLAM":{"n":"BODY SLAM","e":"PARALYZE_SIDE_EFFECT2","p":85,"t":"normal","a":100,"pp":15},"WRAP":{"n":"WRAP","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":85,"pp":20},"TAKE_DOWN":{"n":"TAKE DOWN","e":"RECOIL_EFFECT","p":90,"t":"normal","a":85,"pp":20},"THRASH":{"n":"THRASH","e":"THRASH_PETAL_DANCE_EFFECT","p":90,"t":"normal","a":100,"pp":20},"DOUBLE_EDGE":{"n":"DOUBLE-EDGE","e":"RECOIL_EFFECT","p":100,"t":"normal","a":100,"pp":15},"TAIL_WHIP":{"n":"TAIL WHIP","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"POISON_STING":{"n":"POISON STING","e":"POISON_SIDE_EFFECT1","p":15,"t":"poison","a":100,"pp":35},"TWINEEDLE":{"n":"TWINEEDLE","e":"TWINEEDLE_EFFECT","p":25,"t":"bug","a":100,"pp":20},"PIN_MISSILE":{"n":"PIN MISSILE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":14,"t":"bug","a":85,"pp":20},"LEER":{"n":"LEER","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"BITE":{"n":"BITE","e":"FLINCH_SIDE_EFFECT1","p":60,"t":"normal","a":100,"pp":25},"GROWL":{"n":"GROWL","e":"ATTACK_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":40},"ROAR":{"n":"ROAR","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":100,"pp":20},"SING":{"n":"SING","e":"SLEEP_EFFECT","p":0,"t":"normal","a":55,"pp":15},"SUPERSONIC":{"n":"SUPERSONIC","e":"CONFUSION_EFFECT","p":0,"t":"normal","a":55,"pp":20},"SONICBOOM":{"n":"SONICBOOM","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"normal","a":90,"pp":20},"DISABLE":{"n":"DISABLE","e":"DISABLE_EFFECT","p":0,"t":"normal","a":55,"pp":20},"ACID":{"n":"ACID","e":"DEFENSE_DOWN_SIDE_EFFECT","p":40,"t":"poison","a":100,"pp":30},"EMBER":{"n":"EMBER","e":"BURN_SIDE_EFFECT1","p":40,"t":"fire","a":100,"pp":25},"FLAMETHROWER":{"n":"FLAMETHROWER","e":"BURN_SIDE_EFFECT1","p":95,"t":"fire","a":100,"pp":15},"MIST":{"n":"MIST","e":"MIST_EFFECT","p":0,"t":"ice","a":100,"pp":30},"WATER_GUN":{"n":"WATER GUN","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"water","a":100,"pp":25},"HYDRO_PUMP":{"n":"HYDRO PUMP","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"water","a":80,"pp":5},"SURF":{"n":"SURF","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"water","a":100,"pp":15},"ICE_BEAM":{"n":"ICE BEAM","e":"FREEZE_SIDE_EFFECT1","p":95,"t":"ice","a":100,"pp":10},"BLIZZARD":{"n":"BLIZZARD","e":"FREEZE_SIDE_EFFECT1","p":120,"t":"ice","a":90,"pp":5},"PSYBEAM":{"n":"PSYBEAM","e":"CONFUSION_SIDE_EFFECT","p":65,"t":"psychic","a":100,"pp":20},"BUBBLEBEAM":{"n":"BUBBLEBEAM","e":"SPEED_DOWN_SIDE_EFFECT","p":65,"t":"water","a":100,"pp":20},"AURORA_BEAM":{"n":"AURORA BEAM","e":"ATTACK_DOWN_SIDE_EFFECT","p":65,"t":"ice","a":100,"pp":20},"HYPER_BEAM":{"n":"HYPER BEAM","e":"HYPER_BEAM_EFFECT","p":150,"t":"normal","a":90,"pp":5},"PECK":{"n":"PECK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"DRILL_PECK":{"n":"DRILL PECK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"flying","a":100,"pp":20},"SUBMISSION":{"n":"SUBMISSION","e":"RECOIL_EFFECT","p":80,"t":"fighting","a":80,"pp":25},"LOW_KICK":{"n":"LOW KICK","e":"FLINCH_SIDE_EFFECT2","p":50,"t":"fighting","a":90,"pp":20},"COUNTER":{"n":"COUNTER","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"fighting","a":100,"pp":20},"SEISMIC_TOSS":{"n":"SEISMIC TOSS","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"fighting","a":100,"pp":20},"STRENGTH":{"n":"STRENGTH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":15},"ABSORB":{"n":"ABSORB","e":"DRAIN_HP_EFFECT","p":20,"t":"grass","a":100,"pp":20},"MEGA_DRAIN":{"n":"MEGA DRAIN","e":"DRAIN_HP_EFFECT","p":40,"t":"grass","a":100,"pp":10},"LEECH_SEED":{"n":"LEECH SEED","e":"LEECH_SEED_EFFECT","p":0,"t":"grass","a":90,"pp":10},"GROWTH":{"n":"GROWTH","e":"SPECIAL_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40},"RAZOR_LEAF":{"n":"RAZOR LEAF","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"grass","a":95,"pp":25},"SOLARBEAM":{"n":"SOLARBEAM","e":"CHARGE_EFFECT","p":120,"t":"grass","a":100,"pp":10},"POISONPOWDER":{"n":"POISONPOWDER","e":"POISON_EFFECT","p":0,"t":"poison","a":75,"pp":35},"STUN_SPORE":{"n":"STUN SPORE","e":"PARALYZE_EFFECT","p":0,"t":"grass","a":75,"pp":30},"SLEEP_POWDER":{"n":"SLEEP POWDER","e":"SLEEP_EFFECT","p":0,"t":"grass","a":75,"pp":15},"PETAL_DANCE":{"n":"PETAL DANCE","e":"THRASH_PETAL_DANCE_EFFECT","p":70,"t":"grass","a":100,"pp":20},"STRING_SHOT":{"n":"STRING SHOT","e":"SPEED_DOWN1_EFFECT","p":0,"t":"bug","a":95,"pp":40},"DRAGON_RAGE":{"n":"DRAGON RAGE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"dragon","a":100,"pp":10},"FIRE_SPIN":{"n":"FIRE SPIN","e":"TRAPPING_EFFECT","p":15,"t":"fire","a":70,"pp":15},"THUNDERSHOCK":{"n":"THUNDERSHOCK","e":"PARALYZE_SIDE_EFFECT1","p":40,"t":"electric","a":100,"pp":30},"THUNDERBOLT":{"n":"THUNDERBOLT","e":"PARALYZE_SIDE_EFFECT1","p":95,"t":"electric","a":100,"pp":15},"THUNDER_WAVE":{"n":"THUNDER WAVE","e":"PARALYZE_EFFECT","p":0,"t":"electric","a":100,"pp":20},"THUNDER":{"n":"THUNDER","e":"PARALYZE_SIDE_EFFECT1","p":120,"t":"electric","a":70,"pp":10},"ROCK_THROW":{"n":"ROCK THROW","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"rock","a":65,"pp":15},"EARTHQUAKE":{"n":"EARTHQUAKE","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"ground","a":100,"pp":10},"FISSURE":{"n":"FISSURE","e":"OHKO_EFFECT","p":1,"t":"ground","a":30,"pp":5},"DIG":{"n":"DIG","e":"CHARGE_EFFECT","p":100,"t":"ground","a":100,"pp":10},"TOXIC":{"n":"TOXIC","e":"POISON_EFFECT","p":0,"t":"poison","a":85,"pp":10},"CONFUSION":{"n":"CONFUSION","e":"CONFUSION_SIDE_EFFECT","p":50,"t":"psychic","a":100,"pp":25},"PSYCHIC_M":{"n":"PSYCHIC","e":"SPECIAL_DOWN_SIDE_EFFECT","p":90,"t":"psychic","a":100,"pp":10},"HYPNOSIS":{"n":"HYPNOSIS","e":"SLEEP_EFFECT","p":0,"t":"psychic","a":60,"pp":20},"MEDITATE":{"n":"MEDITATE","e":"ATTACK_UP1_EFFECT","p":0,"t":"psychic","a":100,"pp":40},"AGILITY":{"n":"AGILITY","e":"SPEED_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30},"QUICK_ATTACK":{"n":"QUICK ATTACK","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":30},"RAGE":{"n":"RAGE","e":"RAGE_EFFECT","p":20,"t":"normal","a":100,"pp":20},"TELEPORT":{"n":"TELEPORT","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"psychic","a":100,"pp":20},"NIGHT_SHADE":{"n":"NIGHT SHADE","e":"SPECIAL_DAMAGE_EFFECT","p":0,"t":"ghost","a":100,"pp":15},"MIMIC":{"n":"MIMIC","e":"MIMIC_EFFECT","p":0,"t":"normal","a":100,"pp":10},"SCREECH":{"n":"SCREECH","e":"DEFENSE_DOWN2_EFFECT","p":0,"t":"normal","a":85,"pp":40},"DOUBLE_TEAM":{"n":"DOUBLE TEAM","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":15},"RECOVER":{"n":"RECOVER","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":20},"HARDEN":{"n":"HARDEN","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"MINIMIZE":{"n":"MINIMIZE","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"SMOKESCREEN":{"n":"SMOKESCREEN","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"CONFUSE_RAY":{"n":"CONFUSE RAY","e":"CONFUSION_EFFECT","p":0,"t":"ghost","a":100,"pp":10},"WITHDRAW":{"n":"WITHDRAW","e":"DEFENSE_UP1_EFFECT","p":0,"t":"water","a":100,"pp":40},"DEFENSE_CURL":{"n":"DEFENSE CURL","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40},"BARRIER":{"n":"BARRIER","e":"DEFENSE_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30},"LIGHT_SCREEN":{"n":"LIGHT SCREEN","e":"LIGHT_SCREEN_EFFECT","p":0,"t":"psychic","a":100,"pp":30},"HAZE":{"n":"HAZE","e":"HAZE_EFFECT","p":0,"t":"ice","a":100,"pp":30},"REFLECT":{"n":"REFLECT","e":"REFLECT_EFFECT","p":0,"t":"psychic","a":100,"pp":20},"FOCUS_ENERGY":{"n":"FOCUS ENERGY","e":"FOCUS_ENERGY_EFFECT","p":0,"t":"normal","a":100,"pp":30},"BIDE":{"n":"BIDE","e":"BIDE_EFFECT","p":0,"t":"normal","a":100,"pp":10},"METRONOME":{"n":"METRONOME","e":"METRONOME_EFFECT","p":0,"t":"normal","a":100,"pp":10},"MIRROR_MOVE":{"n":"MIRROR MOVE","e":"MIRROR_MOVE_EFFECT","p":0,"t":"flying","a":100,"pp":20},"SELFDESTRUCT":{"n":"SELFDESTRUCT","e":"EXPLODE_EFFECT","p":130,"t":"normal","a":100,"pp":5},"EGG_BOMB":{"n":"EGG BOMB","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"normal","a":75,"pp":10},"LICK":{"n":"LICK","e":"PARALYZE_SIDE_EFFECT2","p":20,"t":"ghost","a":100,"pp":30},"SMOG":{"n":"SMOG","e":"POISON_SIDE_EFFECT2","p":20,"t":"poison","a":70,"pp":20},"SLUDGE":{"n":"SLUDGE","e":"POISON_SIDE_EFFECT2","p":65,"t":"poison","a":100,"pp":20},"BONE_CLUB":{"n":"BONE CLUB","e":"FLINCH_SIDE_EFFECT1","p":65,"t":"ground","a":85,"pp":20},"FIRE_BLAST":{"n":"FIRE BLAST","e":"BURN_SIDE_EFFECT2","p":120,"t":"fire","a":85,"pp":5},"WATERFALL":{"n":"WATERFALL","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"water","a":100,"pp":15},"CLAMP":{"n":"CLAMP","e":"TRAPPING_EFFECT","p":35,"t":"water","a":75,"pp":10},"SWIFT":{"n":"SWIFT","e":"SWIFT_EFFECT","p":60,"t":"normal","a":100,"pp":20},"SKULL_BASH":{"n":"SKULL BASH","e":"CHARGE_EFFECT","p":100,"t":"normal","a":100,"pp":15},"SPIKE_CANNON":{"n":"SPIKE CANNON","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":20,"t":"normal","a":100,"pp":15},"CONSTRICT":{"n":"CONSTRICT","e":"SPEED_DOWN_SIDE_EFFECT","p":10,"t":"normal","a":100,"pp":35},"AMNESIA":{"n":"AMNESIA","e":"SPECIAL_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":20},"KINESIS":{"n":"KINESIS","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"psychic","a":80,"pp":15},"SOFTBOILED":{"n":"SOFTBOILED","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":10},"HI_JUMP_KICK":{"n":"HI JUMP KICK","e":"JUMP_KICK_EFFECT","p":85,"t":"fighting","a":90,"pp":20},"GLARE":{"n":"GLARE","e":"PARALYZE_EFFECT","p":0,"t":"normal","a":75,"pp":30},"DREAM_EATER":{"n":"DREAM EATER","e":"DREAM_EATER_EFFECT","p":100,"t":"psychic","a":100,"pp":15},"POISON_GAS":{"n":"POISON GAS","e":"POISON_EFFECT","p":0,"t":"poison","a":55,"pp":40},"BARRAGE":{"n":"BARRAGE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"LEECH_LIFE":{"n":"LEECH LIFE","e":"DRAIN_HP_EFFECT","p":20,"t":"bug","a":100,"pp":15},"LOVELY_KISS":{"n":"LOVELY KISS","e":"SLEEP_EFFECT","p":0,"t":"normal","a":75,"pp":10},"SKY_ATTACK":{"n":"SKY ATTACK","e":"CHARGE_EFFECT","p":140,"t":"flying","a":90,"pp":5},"TRANSFORM":{"n":"TRANSFORM","e":"TRANSFORM_EFFECT","p":0,"t":"normal","a":100,"pp":10},"BUBBLE":{"n":"BUBBLE","e":"SPEED_DOWN_SIDE_EFFECT","p":20,"t":"water","a":100,"pp":30},"DIZZY_PUNCH":{"n":"DIZZY PUNCH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":10},"SPORE":{"n":"SPORE","e":"SLEEP_EFFECT","p":0,"t":"grass","a":100,"pp":15},"FLASH":{"n":"FLASH","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":70,"pp":20},"PSYWAVE":{"n":"PSYWAVE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"psychic","a":80,"pp":15},"SPLASH":{"n":"SPLASH","e":"SPLASH_EFFECT","p":0,"t":"normal","a":100,"pp":40},"ACID_ARMOR":{"n":"ACID ARMOR","e":"DEFENSE_UP2_EFFECT","p":0,"t":"poison","a":100,"pp":40},"CRABHAMMER":{"n":"CRABHAMMER","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"water","a":85,"pp":10},"EXPLOSION":{"n":"EXPLOSION","e":"EXPLODE_EFFECT","p":170,"t":"normal","a":100,"pp":5},"FURY_SWIPES":{"n":"FURY SWIPES","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":80,"pp":15},"BONEMERANG":{"n":"BONEMERANG","e":"ATTACK_TWICE_EFFECT","p":50,"t":"ground","a":90,"pp":10},"REST":{"n":"REST","e":"HEAL_EFFECT","p":0,"t":"psychic","a":100,"pp":10},"ROCK_SLIDE":{"n":"ROCK SLIDE","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"rock","a":90,"pp":10},"HYPER_FANG":{"n":"HYPER FANG","e":"FLINCH_SIDE_EFFECT1","p":80,"t":"normal","a":90,"pp":15},"SHARPEN":{"n":"SHARPEN","e":"ATTACK_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"CONVERSION":{"n":"CONVERSION","e":"CONVERSION_EFFECT","p":0,"t":"normal","a":100,"pp":30},"TRI_ATTACK":{"n":"TRI ATTACK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":10},"SUPER_FANG":{"n":"SUPER FANG","e":"SUPER_FANG_EFFECT","p":1,"t":"normal","a":90,"pp":10},"SLASH":{"n":"SLASH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":20},"SUBSTITUTE":{"n":"SUBSTITUTE","e":"SUBSTITUTE_EFFECT","p":0,"t":"normal","a":100,"pp":10},"STRUGGLE":{"n":"STRUGGLE","e":"RECOIL_EFFECT","p":50,"t":"normal","a":100,"pp":10}},"chart":[["water","fire",20],["fire","grass",20],["fire","ice",20],["grass","water",20],["electric","water",20],["water","rock",20],["ground","flying",0],["water","water",5],["fire","fire",5],["electric","electric",5],["ice","ice",5],["grass","grass",5],["psychic","psychic",5],["fire","water",5],["grass","fire",5],["water","grass",5],["electric","grass",5],["normal","rock",5],["normal","ghost",0],["ghost","ghost",20],["fire","bug",20],["fire","rock",5],["water","ground",20],["electric","ground",0],["electric","flying",20],["grass","ground",20],["grass","bug",5],["grass","poison",5],["grass","rock",20],["grass","flying",5],["ice","water",5],["ice","grass",20],["ice","ground",20],["ice","flying",20],["fighting","normal",20],["fighting","poison",5],["fighting","flying",5],["fighting","psychic",5],["fighting","bug",5],["fighting","rock",20],["fighting","ice",20],["fighting","ghost",0],["poison","grass",20],["poison","poison",5],["poison","ground",5],["poison","bug",20],["poison","rock",5],["poison","ghost",5],["ground","fire",20],["ground","electric",20],["ground","grass",5],["ground","bug",5],["ground","rock",20],["ground","poison",20],["flying","electric",5],["flying","fighting",20],["flying","bug",20],["flying","grass",20],["flying","rock",5],["psychic","fighting",20],["psychic","poison",20],["bug","fire",5],["bug","grass",20],["bug","fighting",5],["bug","flying",5],["bug","psychic",20],["bug","ghost",5],["bug","poison",20],["rock","fire",20],["rock","fighting",5],["rock","ground",5],["rock","flying",20],["rock","bug",20],["rock","ice",20],["ghost","normal",0],["ghost","psychic",0],["fire","dragon",5],["water","dragon",5],["electric","dragon",5],["grass","dragon",5],["ice","dragon",20],["dragon","dragon",20]]};
+const GEN2 = {"mons":{"1":{"n":"BULBASAUR","t":["grass","poison"],"s":[45,49,49,45,65,65],"m":["TACKLE","GROWL"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[20,"POISONPOWDER"],[27,"RAZOR_LEAF"],[34,"GROWTH"],[41,"SLEEP_POWDER"],[48,"SOLARBEAM"]],"e":[2]},"2":{"n":"IVYSAUR","t":["grass","poison"],"s":[60,62,63,60,80,80],"m":["TACKLE","GROWL","LEECH_SEED"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[38,"GROWTH"],[46,"SLEEP_POWDER"],[54,"SOLARBEAM"]],"e":[3]},"3":{"n":"VENUSAUR","t":["grass","poison"],"s":[80,82,83,80,100,100],"m":["TACKLE","GROWL","LEECH_SEED","VINE_WHIP"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[43,"GROWTH"],[55,"SLEEP_POWDER"],[65,"SOLARBEAM"]],"e":[]},"4":{"n":"CHARMANDER","t":["fire"],"s":[39,52,43,65,60,50],"m":["SCRATCH","GROWL"],"l":[[9,"EMBER"],[15,"LEER"],[22,"RAGE"],[30,"SLASH"],[38,"FLAMETHROWER"],[46,"FIRE_SPIN"]],"e":[5]},"5":{"n":"CHARMELEON","t":["fire"],"s":[58,64,58,80,80,65],"m":["SCRATCH","GROWL","EMBER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[33,"SLASH"],[42,"FLAMETHROWER"],[56,"FIRE_SPIN"]],"e":[6]},"6":{"n":"CHARIZARD","t":["fire","flying"],"s":[78,84,78,100,109,85],"m":["SCRATCH","GROWL","EMBER","LEER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[36,"SLASH"],[46,"FLAMETHROWER"],[55,"FIRE_SPIN"]],"e":[]},"7":{"n":"SQUIRTLE","t":["water"],"s":[44,48,65,43,50,64],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[22,"BITE"],[28,"WITHDRAW"],[35,"SKULL_BASH"],[42,"HYDRO_PUMP"]],"e":[8]},"8":{"n":"WARTORTLE","t":["water"],"s":[59,63,80,58,65,80],"m":["TACKLE","TAIL_WHIP","BUBBLE"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[39,"SKULL_BASH"],[47,"HYDRO_PUMP"]],"e":[9]},"9":{"n":"BLASTOISE","t":["water"],"s":[79,83,100,78,85,105],"m":["TACKLE","TAIL_WHIP","BUBBLE","WATER_GUN"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[42,"SKULL_BASH"],[52,"HYDRO_PUMP"]],"e":[]},"10":{"n":"CATERPIE","t":["bug"],"s":[45,30,35,45,20,20],"m":["TACKLE","STRING_SHOT"],"l":[],"e":[11]},"11":{"n":"METAPOD","t":["bug"],"s":[50,20,55,30,25,25],"m":["HARDEN"],"l":[],"e":[12]},"12":{"n":"BUTTERFREE","t":["bug","flying"],"s":[60,45,50,70,80,80],"m":["CONFUSION"],"l":[[12,"CONFUSION"],[15,"POISONPOWDER"],[16,"STUN_SPORE"],[17,"SLEEP_POWDER"],[21,"SUPERSONIC"],[26,"WHIRLWIND"],[32,"PSYBEAM"]],"e":[]},"13":{"n":"WEEDLE","t":["bug","poison"],"s":[40,35,30,50,20,20],"m":["POISON_STING","STRING_SHOT"],"l":[],"e":[14]},"14":{"n":"KAKUNA","t":["bug","poison"],"s":[45,25,50,35,25,25],"m":["HARDEN"],"l":[],"e":[15]},"15":{"n":"BEEDRILL","t":["bug","poison"],"s":[65,80,40,75,45,80],"m":["FURY_ATTACK"],"l":[[12,"FURY_ATTACK"],[16,"FOCUS_ENERGY"],[20,"TWINEEDLE"],[25,"RAGE"],[30,"PIN_MISSILE"],[35,"AGILITY"]],"e":[]},"16":{"n":"PIDGEY","t":["normal","flying"],"s":[40,45,40,56,35,35],"m":["GUST"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[19,"WHIRLWIND"],[28,"WING_ATTACK"],[36,"AGILITY"],[44,"MIRROR_MOVE"]],"e":[17]},"17":{"n":"PIDGEOTTO","t":["normal","flying"],"s":[63,60,55,71,50,50],"m":["GUST","SAND_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[40,"AGILITY"],[49,"MIRROR_MOVE"]],"e":[18]},"18":{"n":"PIDGEOT","t":["normal","flying"],"s":[83,80,75,91,70,70],"m":["GUST","SAND_ATTACK","QUICK_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[44,"AGILITY"],[54,"MIRROR_MOVE"]],"e":[]},"19":{"n":"RATTATA","t":["normal"],"s":[30,56,35,72,25,35],"m":["TACKLE","TAIL_WHIP"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[23,"FOCUS_ENERGY"],[34,"SUPER_FANG"]],"e":[20]},"20":{"n":"RATICATE","t":["normal"],"s":[55,81,60,97,50,70],"m":["TACKLE","TAIL_WHIP","QUICK_ATTACK"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[27,"FOCUS_ENERGY"],[41,"SUPER_FANG"]],"e":[]},"21":{"n":"SPEAROW","t":["normal","flying"],"s":[40,60,30,70,31,31],"m":["PECK","GROWL"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[22,"MIRROR_MOVE"],[29,"DRILL_PECK"],[36,"AGILITY"]],"e":[22]},"22":{"n":"FEAROW","t":["normal","flying"],"s":[65,90,65,100,61,61],"m":["PECK","GROWL","LEER"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[25,"MIRROR_MOVE"],[34,"DRILL_PECK"],[43,"AGILITY"]],"e":[]},"23":{"n":"EKANS","t":["poison"],"s":[35,60,44,55,40,54],"m":["WRAP","LEER"],"l":[[10,"POISON_STING"],[17,"BITE"],[24,"GLARE"],[31,"SCREECH"],[38,"ACID"]],"e":[24]},"24":{"n":"ARBOK","t":["poison"],"s":[60,85,69,80,65,79],"m":["WRAP","LEER","POISON_STING"],"l":[[10,"POISON_STING"],[17,"BITE"],[27,"GLARE"],[36,"SCREECH"],[47,"ACID"]],"e":[]},"25":{"n":"PIKACHU","t":["electric"],"s":[35,55,30,90,50,40],"m":["THUNDERSHOCK","GROWL"],"l":[[9,"THUNDER_WAVE"],[16,"QUICK_ATTACK"],[26,"SWIFT"],[33,"AGILITY"],[43,"THUNDER"]],"e":[26]},"26":{"n":"RAICHU","t":["electric"],"s":[60,90,55,100,90,80],"m":["THUNDERSHOCK","GROWL","THUNDER_WAVE"],"l":[],"e":[]},"27":{"n":"SANDSHREW","t":["ground"],"s":[50,75,85,40,20,30],"m":["SCRATCH"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[24,"POISON_STING"],[31,"SWIFT"],[38,"FURY_SWIPES"]],"e":[28]},"28":{"n":"SANDSLASH","t":["ground"],"s":[75,100,110,65,45,55],"m":["SCRATCH","SAND_ATTACK"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[27,"POISON_STING"],[36,"SWIFT"],[47,"FURY_SWIPES"]],"e":[]},"29":{"n":"NIDORAN-F","t":["poison"],"s":[55,47,52,41,40,40],"m":["GROWL","TACKLE"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[21,"TAIL_WHIP"],[29,"BITE"],[36,"FURY_SWIPES"],[43,"DOUBLE_KICK"]],"e":[30]},"30":{"n":"NIDORINA","t":["poison"],"s":[70,62,67,56,55,55],"m":["GROWL","TACKLE","SCRATCH"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"TAIL_WHIP"],[32,"BITE"],[41,"FURY_SWIPES"],[50,"DOUBLE_KICK"]],"e":[31]},"31":{"n":"NIDOQUEEN","t":["poison","ground"],"s":[90,82,87,76,75,85],"m":["TACKLE","SCRATCH","TAIL_WHIP","BODY_SLAM"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"BODY_SLAM"]],"e":[]},"32":{"n":"NIDORAN-M","t":["poison"],"s":[46,57,40,50,40,40],"m":["LEER","TACKLE"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[21,"FOCUS_ENERGY"],[29,"FURY_ATTACK"],[36,"HORN_DRILL"],[43,"DOUBLE_KICK"]],"e":[33]},"33":{"n":"NIDORINO","t":["poison"],"s":[61,72,57,65,55,55],"m":["LEER","TACKLE","HORN_ATTACK"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"FOCUS_ENERGY"],[32,"FURY_ATTACK"],[41,"HORN_DRILL"],[50,"DOUBLE_KICK"]],"e":[34]},"34":{"n":"NIDOKING","t":["poison","ground"],"s":[81,92,77,85,85,75],"m":["TACKLE","HORN_ATTACK","POISON_STING","THRASH"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"THRASH"]],"e":[]},"35":{"n":"CLEFAIRY","t":["normal"],"s":[70,45,48,35,60,65],"m":["POUND","GROWL"],"l":[[13,"SING"],[18,"DOUBLESLAP"],[24,"MINIMIZE"],[31,"METRONOME"],[39,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"]],"e":[36]},"36":{"n":"CLEFABLE","t":["normal"],"s":[95,70,73,60,85,90],"m":["SING","DOUBLESLAP","MINIMIZE","METRONOME"],"l":[],"e":[]},"37":{"n":"VULPIX","t":["fire"],"s":[38,41,40,65,50,65],"m":["EMBER","TAIL_WHIP"],"l":[[16,"QUICK_ATTACK"],[21,"ROAR"],[28,"CONFUSE_RAY"],[35,"FLAMETHROWER"],[42,"FIRE_SPIN"]],"e":[38]},"38":{"n":"NINETALES","t":["fire"],"s":[73,76,75,100,81,100],"m":["EMBER","TAIL_WHIP","QUICK_ATTACK","ROAR"],"l":[],"e":[]},"39":{"n":"JIGGLYPUFF","t":["normal"],"s":[115,45,20,20,45,25],"m":["SING"],"l":[[9,"POUND"],[14,"DISABLE"],[19,"DEFENSE_CURL"],[24,"DOUBLESLAP"],[29,"REST"],[34,"BODY_SLAM"],[39,"DOUBLE_EDGE"]],"e":[40]},"40":{"n":"WIGGLYTUFF","t":["normal"],"s":[140,70,45,45,75,50],"m":["SING","DISABLE","DEFENSE_CURL","DOUBLESLAP"],"l":[],"e":[]},"41":{"n":"ZUBAT","t":["poison","flying"],"s":[40,45,35,55,30,40],"m":["LEECH_LIFE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[28,"WING_ATTACK"],[36,"HAZE"]],"e":[42]},"42":{"n":"GOLBAT","t":["poison","flying"],"s":[75,80,70,90,65,75],"m":["LEECH_LIFE","SCREECH","BITE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[32,"WING_ATTACK"],[43,"HAZE"]],"e":[169]},"43":{"n":"ODDISH","t":["grass","poison"],"s":[45,50,55,30,75,65],"m":["ABSORB"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[24,"ACID"],[33,"PETAL_DANCE"],[46,"SOLARBEAM"]],"e":[44]},"44":{"n":"GLOOM","t":["grass","poison"],"s":[60,65,70,40,85,75],"m":["ABSORB","POISONPOWDER","STUN_SPORE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[28,"ACID"],[38,"PETAL_DANCE"],[52,"SOLARBEAM"]],"e":[45,182]},"45":{"n":"VILEPLUME","t":["grass","poison"],"s":[75,80,85,50,110,90],"m":["STUN_SPORE","SLEEP_POWDER","ACID","PETAL_DANCE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"]],"e":[]},"46":{"n":"PARAS","t":["bug","grass"],"s":[35,70,55,25,40,55],"m":["SCRATCH"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[27,"SPORE"],[34,"SLASH"],[41,"GROWTH"]],"e":[47]},"47":{"n":"PARASECT","t":["bug","grass"],"s":[60,95,80,30,60,80],"m":["SCRATCH","STUN_SPORE","LEECH_LIFE"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[30,"SPORE"],[39,"SLASH"],[48,"GROWTH"]],"e":[]},"48":{"n":"VENONAT","t":["bug","poison"],"s":[60,55,50,45,40,55],"m":["TACKLE","DISABLE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[35,"PSYBEAM"],[38,"SLEEP_POWDER"],[43,"PSYCHIC_M"]],"e":[49]},"49":{"n":"VENOMOTH","t":["bug","poison"],"s":[70,65,60,90,90,75],"m":["TACKLE","DISABLE","POISONPOWDER","LEECH_LIFE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[38,"PSYBEAM"],[43,"SLEEP_POWDER"],[50,"PSYCHIC_M"]],"e":[]},"50":{"n":"DIGLETT","t":["ground"],"s":[10,55,25,95,35,45],"m":["SCRATCH"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[31,"SLASH"],[40,"EARTHQUAKE"]],"e":[51]},"51":{"n":"DUGTRIO","t":["ground"],"s":[35,80,50,120,50,70],"m":["SCRATCH","GROWL","DIG"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[35,"SLASH"],[47,"EARTHQUAKE"]],"e":[]},"52":{"n":"MEOWTH","t":["normal"],"s":[40,45,35,90,40,40],"m":["SCRATCH","GROWL"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[33,"FURY_SWIPES"],[44,"SLASH"]],"e":[53]},"53":{"n":"PERSIAN","t":["normal"],"s":[65,70,60,115,65,65],"m":["SCRATCH","GROWL","BITE","SCREECH"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[37,"FURY_SWIPES"],[51,"SLASH"]],"e":[]},"54":{"n":"PSYDUCK","t":["water"],"s":[50,52,48,55,65,50],"m":["SCRATCH"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[36,"CONFUSION"],[43,"FURY_SWIPES"],[52,"HYDRO_PUMP"]],"e":[55]},"55":{"n":"GOLDUCK","t":["water"],"s":[80,82,78,85,95,80],"m":["SCRATCH","TAIL_WHIP","DISABLE"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[39,"CONFUSION"],[48,"FURY_SWIPES"],[59,"HYDRO_PUMP"]],"e":[]},"56":{"n":"MANKEY","t":["fighting"],"s":[40,80,35,70,35,45],"m":["SCRATCH","LEER"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[33,"SEISMIC_TOSS"],[39,"THRASH"]],"e":[57]},"57":{"n":"PRIMEAPE","t":["fighting"],"s":[65,105,60,95,60,70],"m":["SCRATCH","LEER","KARATE_CHOP","FURY_SWIPES"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[37,"SEISMIC_TOSS"],[46,"THRASH"]],"e":[]},"58":{"n":"GROWLITHE","t":["fire"],"s":[55,70,45,60,70,50],"m":["BITE","ROAR"],"l":[[18,"EMBER"],[23,"LEER"],[30,"TAKE_DOWN"],[39,"AGILITY"],[50,"FLAMETHROWER"]],"e":[59]},"59":{"n":"ARCANINE","t":["fire"],"s":[90,110,80,95,100,80],"m":["ROAR","EMBER","LEER","TAKE_DOWN"],"l":[],"e":[]},"60":{"n":"POLIWAG","t":["water"],"s":[40,50,40,90,40,40],"m":["BUBBLE"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[25,"DOUBLESLAP"],[31,"BODY_SLAM"],[38,"AMNESIA"],[45,"HYDRO_PUMP"]],"e":[61]},"61":{"n":"POLIWHIRL","t":["water"],"s":[65,65,65,90,50,50],"m":["BUBBLE","HYPNOSIS","WATER_GUN"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[26,"DOUBLESLAP"],[33,"BODY_SLAM"],[41,"AMNESIA"],[49,"HYDRO_PUMP"]],"e":[62,186]},"62":{"n":"POLIWRATH","t":["water","fighting"],"s":[90,85,95,70,70,90],"m":["HYPNOSIS","WATER_GUN","DOUBLESLAP","BODY_SLAM"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"]],"e":[]},"63":{"n":"ABRA","t":["psychic"],"s":[25,20,15,90,105,55],"m":["TELEPORT"],"l":[],"e":[64]},"64":{"n":"KADABRA","t":["psychic"],"s":[40,35,30,105,120,70],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[65]},"65":{"n":"ALAKAZAM","t":["psychic"],"s":[55,50,45,120,135,85],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[]},"66":{"n":"MACHOP","t":["fighting"],"s":[70,80,50,35,35,35],"m":["KARATE_CHOP"],"l":[[20,"LOW_KICK"],[25,"LEER"],[32,"FOCUS_ENERGY"],[39,"SEISMIC_TOSS"],[46,"SUBMISSION"]],"e":[67]},"67":{"n":"MACHOKE","t":["fighting"],"s":[80,100,70,45,50,60],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[68]},"68":{"n":"MACHAMP","t":["fighting"],"s":[90,130,80,55,65,85],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[]},"69":{"n":"BELLSPROUT","t":["grass","poison"],"s":[50,75,35,40,70,30],"m":["VINE_WHIP","GROWTH"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[21,"STUN_SPORE"],[26,"ACID"],[33,"RAZOR_LEAF"],[42,"SLAM"]],"e":[70]},"70":{"n":"WEEPINBELL","t":["grass","poison"],"s":[65,90,50,55,85,45],"m":["VINE_WHIP","GROWTH","WRAP"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[23,"STUN_SPORE"],[29,"ACID"],[38,"RAZOR_LEAF"],[49,"SLAM"]],"e":[71]},"71":{"n":"VICTREEBEL","t":["grass","poison"],"s":[80,105,65,70,100,60],"m":["SLEEP_POWDER","STUN_SPORE","ACID","RAZOR_LEAF"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"]],"e":[]},"72":{"n":"TENTACOOL","t":["water","poison"],"s":[40,40,35,70,50,100],"m":["ACID"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[33,"BARRIER"],[40,"SCREECH"],[48,"HYDRO_PUMP"]],"e":[73]},"73":{"n":"TENTACRUEL","t":["water","poison"],"s":[80,70,65,100,80,120],"m":["ACID","SUPERSONIC","WRAP"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[35,"BARRIER"],[43,"SCREECH"],[50,"HYDRO_PUMP"]],"e":[]},"74":{"n":"GEODUDE","t":["rock","ground"],"s":[40,80,100,20,30,30],"m":["TACKLE"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[26,"HARDEN"],[31,"EARTHQUAKE"],[36,"EXPLOSION"]],"e":[75]},"75":{"n":"GRAVELER","t":["rock","ground"],"s":[55,95,115,35,45,45],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[76]},"76":{"n":"GOLEM","t":["rock","ground"],"s":[80,110,130,45,55,65],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[]},"77":{"n":"PONYTA","t":["fire"],"s":[50,85,55,90,65,65],"m":["EMBER"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[43,"TAKE_DOWN"],[48,"AGILITY"]],"e":[78]},"78":{"n":"RAPIDASH","t":["fire"],"s":[65,100,70,105,80,80],"m":["EMBER","TAIL_WHIP","STOMP","GROWL"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[47,"TAKE_DOWN"],[55,"AGILITY"]],"e":[]},"79":{"n":"SLOWPOKE","t":["water","psychic"],"s":[90,65,65,15,40,40],"m":["CONFUSION"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[40,"AMNESIA"],[48,"PSYCHIC_M"]],"e":[80,199]},"80":{"n":"SLOWBRO","t":["water","psychic"],"s":[95,75,110,30,100,80],"m":["CONFUSION","DISABLE","HEADBUTT"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[37,"WITHDRAW"],[44,"AMNESIA"],[55,"PSYCHIC_M"]],"e":[]},"81":{"n":"MAGNEMITE","t":["electric","steel"],"s":[25,35,70,45,95,55],"m":["TACKLE"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[35,"THUNDER_WAVE"],[41,"SWIFT"],[47,"SCREECH"]],"e":[82]},"82":{"n":"MAGNETON","t":["electric","steel"],"s":[50,60,95,70,120,70],"m":["TACKLE","SONICBOOM","THUNDERSHOCK"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[38,"THUNDER_WAVE"],[46,"SWIFT"],[54,"SCREECH"]],"e":[]},"83":{"n":"FARFETCHD","t":["normal","flying"],"s":[52,65,55,60,58,62],"m":["PECK","SAND_ATTACK"],"l":[[7,"LEER"],[15,"FURY_ATTACK"],[23,"SWORDS_DANCE"],[31,"AGILITY"],[39,"SLASH"]],"e":[]},"84":{"n":"DODUO","t":["normal","flying"],"s":[35,85,45,75,35,35],"m":["PECK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[36,"RAGE"],[40,"TRI_ATTACK"],[44,"AGILITY"]],"e":[85]},"85":{"n":"DODRIO","t":["normal","flying"],"s":[60,110,70,100,60,60],"m":["PECK","GROWL","FURY_ATTACK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[39,"RAGE"],[45,"TRI_ATTACK"],[51,"AGILITY"]],"e":[]},"86":{"n":"SEEL","t":["water"],"s":[65,45,55,45,45,70],"m":["HEADBUTT"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[40,"REST"],[45,"TAKE_DOWN"],[50,"ICE_BEAM"]],"e":[87]},"87":{"n":"DEWGONG","t":["water","ice"],"s":[90,70,80,70,70,95],"m":["HEADBUTT","GROWL","AURORA_BEAM"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[44,"REST"],[50,"TAKE_DOWN"],[56,"ICE_BEAM"]],"e":[]},"88":{"n":"GRIMER","t":["poison"],"s":[80,80,50,25,40,50],"m":["POUND","DISABLE"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[42,"HARDEN"],[48,"SCREECH"],[55,"ACID_ARMOR"]],"e":[89]},"89":{"n":"MUK","t":["poison"],"s":[105,105,75,50,65,100],"m":["POUND","DISABLE","POISON_GAS"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[45,"HARDEN"],[53,"SCREECH"],[60,"ACID_ARMOR"]],"e":[]},"90":{"n":"SHELLDER","t":["water"],"s":[30,65,100,40,45,25],"m":["TACKLE","WITHDRAW"],"l":[[18,"SUPERSONIC"],[23,"CLAMP"],[30,"AURORA_BEAM"],[39,"LEER"],[50,"ICE_BEAM"]],"e":[91]},"91":{"n":"CLOYSTER","t":["water","ice"],"s":[50,95,180,70,85,45],"m":["WITHDRAW","SUPERSONIC","CLAMP","AURORA_BEAM"],"l":[[50,"SPIKE_CANNON"]],"e":[]},"92":{"n":"GASTLY","t":["ghost","poison"],"s":[30,35,30,80,100,35],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[27,"HYPNOSIS"],[35,"DREAM_EATER"]],"e":[93]},"93":{"n":"HAUNTER","t":["ghost","poison"],"s":[45,50,45,95,115,55],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[94]},"94":{"n":"GENGAR","t":["ghost","poison"],"s":[60,65,60,110,130,75],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[]},"95":{"n":"ONIX","t":["rock","ground"],"s":[35,45,160,70,30,45],"m":["TACKLE","SCREECH"],"l":[[15,"BIND"],[19,"ROCK_THROW"],[25,"RAGE"],[33,"SLAM"],[43,"HARDEN"]],"e":[208]},"96":{"n":"DROWZEE","t":["psychic"],"s":[60,48,45,42,43,90],"m":["POUND","HYPNOSIS"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[29,"POISON_GAS"],[32,"PSYCHIC_M"],[37,"MEDITATE"]],"e":[97]},"97":{"n":"HYPNO","t":["psychic"],"s":[85,73,70,67,73,115],"m":["POUND","HYPNOSIS","DISABLE","CONFUSION"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[33,"POISON_GAS"],[37,"PSYCHIC_M"],[43,"MEDITATE"]],"e":[]},"98":{"n":"KRABBY","t":["water"],"s":[30,105,90,50,25,25],"m":["BUBBLE","LEER"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[30,"STOMP"],[35,"CRABHAMMER"],[40,"HARDEN"]],"e":[99]},"99":{"n":"KINGLER","t":["water"],"s":[55,130,115,75,50,50],"m":["BUBBLE","LEER","VICEGRIP"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[34,"STOMP"],[42,"CRABHAMMER"],[49,"HARDEN"]],"e":[]},"100":{"n":"VOLTORB","t":["electric"],"s":[40,30,50,100,55,55],"m":["TACKLE","SCREECH"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[36,"SWIFT"],[43,"EXPLOSION"]],"e":[101]},"101":{"n":"ELECTRODE","t":["electric"],"s":[60,50,70,140,80,80],"m":["TACKLE","SCREECH","SONICBOOM"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[40,"SWIFT"],[50,"EXPLOSION"]],"e":[]},"102":{"n":"EXEGGCUTE","t":["grass","psychic"],"s":[60,40,80,40,60,45],"m":["BARRAGE","HYPNOSIS"],"l":[[25,"REFLECT"],[28,"LEECH_SEED"],[32,"STUN_SPORE"],[37,"POISONPOWDER"],[42,"SOLARBEAM"],[48,"SLEEP_POWDER"]],"e":[103]},"103":{"n":"EXEGGUTOR","t":["grass","psychic"],"s":[95,95,85,55,125,65],"m":["BARRAGE","HYPNOSIS"],"l":[[28,"STOMP"]],"e":[]},"104":{"n":"CUBONE","t":["ground"],"s":[50,50,95,35,40,50],"m":["BONE_CLUB","GROWL"],"l":[[25,"LEER"],[31,"FOCUS_ENERGY"],[38,"THRASH"],[43,"BONEMERANG"],[46,"RAGE"]],"e":[105]},"105":{"n":"MAROWAK","t":["ground"],"s":[60,80,110,45,50,80],"m":["BONE_CLUB","GROWL","LEER","FOCUS_ENERGY"],"l":[[25,"LEER"],[33,"FOCUS_ENERGY"],[41,"THRASH"],[48,"BONEMERANG"],[55,"RAGE"]],"e":[]},"106":{"n":"HITMONLEE","t":["fighting"],"s":[50,120,53,87,35,110],"m":["DOUBLE_KICK","MEDITATE"],"l":[[33,"ROLLING_KICK"],[38,"JUMP_KICK"],[43,"FOCUS_ENERGY"],[48,"HI_JUMP_KICK"],[53,"MEGA_KICK"]],"e":[]},"107":{"n":"HITMONCHAN","t":["fighting"],"s":[50,105,79,76,35,110],"m":["COMET_PUNCH","AGILITY"],"l":[[33,"FIRE_PUNCH"],[38,"ICE_PUNCH"],[43,"THUNDERPUNCH"],[48,"MEGA_PUNCH"],[53,"COUNTER"]],"e":[]},"108":{"n":"LICKITUNG","t":["normal"],"s":[90,55,75,30,60,75],"m":["WRAP","SUPERSONIC"],"l":[[7,"STOMP"],[15,"DISABLE"],[23,"DEFENSE_CURL"],[31,"SLAM"],[39,"SCREECH"]],"e":[]},"109":{"n":"KOFFING","t":["poison"],"s":[40,65,95,35,60,45],"m":["TACKLE","SMOG"],"l":[[32,"SLUDGE"],[37,"SMOKESCREEN"],[40,"SELFDESTRUCT"],[45,"HAZE"],[48,"EXPLOSION"]],"e":[110]},"110":{"n":"WEEZING","t":["poison"],"s":[65,90,120,60,85,70],"m":["TACKLE","SMOG","SLUDGE"],"l":[[32,"SLUDGE"],[39,"SMOKESCREEN"],[43,"SELFDESTRUCT"],[49,"HAZE"],[53,"EXPLOSION"]],"e":[]},"111":{"n":"RHYHORN","t":["ground","rock"],"s":[80,85,95,25,30,30],"m":["HORN_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[45,"HORN_DRILL"],[50,"LEER"],[55,"TAKE_DOWN"]],"e":[112]},"112":{"n":"RHYDON","t":["ground","rock"],"s":[105,130,120,40,45,45],"m":["HORN_ATTACK","STOMP","TAIL_WHIP","FURY_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[48,"HORN_DRILL"],[55,"LEER"],[64,"TAKE_DOWN"]],"e":[]},"113":{"n":"CHANSEY","t":["normal"],"s":[250,5,5,50,35,105],"m":["POUND","DOUBLESLAP"],"l":[[24,"SING"],[30,"GROWL"],[38,"MINIMIZE"],[44,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"],[54,"DOUBLE_EDGE"]],"e":[242]},"114":{"n":"TANGELA","t":["grass"],"s":[65,55,115,60,100,40],"m":["CONSTRICT","BIND"],"l":[[29,"ABSORB"],[32,"POISONPOWDER"],[36,"STUN_SPORE"],[39,"SLEEP_POWDER"],[45,"SLAM"],[49,"GROWTH"]],"e":[]},"115":{"n":"KANGASKHAN","t":["normal"],"s":[105,95,80,90,40,80],"m":["COMET_PUNCH","RAGE"],"l":[[26,"BITE"],[31,"TAIL_WHIP"],[36,"MEGA_PUNCH"],[41,"LEER"],[46,"DIZZY_PUNCH"]],"e":[]},"116":{"n":"HORSEA","t":["water"],"s":[30,40,70,60,70,25],"m":["BUBBLE"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[37,"AGILITY"],[45,"HYDRO_PUMP"]],"e":[117]},"117":{"n":"SEADRA","t":["water"],"s":[55,65,95,85,95,45],"m":["BUBBLE","SMOKESCREEN"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[41,"AGILITY"],[52,"HYDRO_PUMP"]],"e":[230]},"118":{"n":"GOLDEEN","t":["water"],"s":[45,67,60,63,35,50],"m":["PECK","TAIL_WHIP"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[37,"WATERFALL"],[45,"HORN_DRILL"],[54,"AGILITY"]],"e":[119]},"119":{"n":"SEAKING","t":["water"],"s":[80,92,65,68,65,80],"m":["PECK","TAIL_WHIP","SUPERSONIC"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[39,"WATERFALL"],[48,"HORN_DRILL"],[54,"AGILITY"]],"e":[]},"120":{"n":"STARYU","t":["water"],"s":[30,45,55,85,70,55],"m":["TACKLE"],"l":[[17,"WATER_GUN"],[22,"HARDEN"],[27,"RECOVER"],[32,"SWIFT"],[37,"MINIMIZE"],[42,"LIGHT_SCREEN"],[47,"HYDRO_PUMP"]],"e":[121]},"121":{"n":"STARMIE","t":["water","psychic"],"s":[60,75,85,115,100,85],"m":["TACKLE","WATER_GUN","HARDEN"],"l":[],"e":[]},"122":{"n":"MR-MIME","t":["psychic"],"s":[40,45,65,90,100,120],"m":["CONFUSION","BARRIER"],"l":[[15,"CONFUSION"],[23,"LIGHT_SCREEN"],[31,"DOUBLESLAP"],[39,"MEDITATE"],[47,"SUBSTITUTE"]],"e":[]},"123":{"n":"SCYTHER","t":["bug","flying"],"s":[70,110,80,105,55,80],"m":["QUICK_ATTACK"],"l":[[17,"LEER"],[20,"FOCUS_ENERGY"],[24,"DOUBLE_TEAM"],[29,"SLASH"],[35,"SWORDS_DANCE"],[42,"AGILITY"]],"e":[212]},"124":{"n":"JYNX","t":["ice","psychic"],"s":[65,50,35,95,115,95],"m":["POUND","LOVELY_KISS"],"l":[[18,"LICK"],[23,"DOUBLESLAP"],[31,"ICE_PUNCH"],[39,"BODY_SLAM"],[47,"THRASH"],[58,"BLIZZARD"]],"e":[]},"125":{"n":"ELECTABUZZ","t":["electric"],"s":[65,83,57,105,95,85],"m":["QUICK_ATTACK","LEER"],"l":[[34,"THUNDERSHOCK"],[37,"SCREECH"],[42,"THUNDERPUNCH"],[49,"LIGHT_SCREEN"],[54,"THUNDER"]],"e":[]},"126":{"n":"MAGMAR","t":["fire"],"s":[65,95,57,93,100,85],"m":["EMBER"],"l":[[36,"LEER"],[39,"CONFUSE_RAY"],[43,"FIRE_PUNCH"],[48,"SMOKESCREEN"],[52,"SMOG"],[55,"FLAMETHROWER"]],"e":[]},"127":{"n":"PINSIR","t":["bug"],"s":[65,125,100,85,55,70],"m":["VICEGRIP"],"l":[[25,"SEISMIC_TOSS"],[30,"GUILLOTINE"],[36,"FOCUS_ENERGY"],[43,"HARDEN"],[49,"SLASH"],[54,"SWORDS_DANCE"]],"e":[]},"128":{"n":"TAUROS","t":["normal"],"s":[75,100,95,110,40,70],"m":["TACKLE"],"l":[[21,"STOMP"],[28,"TAIL_WHIP"],[35,"LEER"],[44,"RAGE"],[51,"TAKE_DOWN"]],"e":[]},"129":{"n":"MAGIKARP","t":["water"],"s":[20,10,55,80,15,20],"m":["SPLASH"],"l":[[15,"TACKLE"]],"e":[130]},"130":{"n":"GYARADOS","t":["water","flying"],"s":[95,125,79,81,60,100],"m":["BITE","DRAGON_RAGE","LEER","HYDRO_PUMP"],"l":[[20,"BITE"],[25,"DRAGON_RAGE"],[32,"LEER"],[41,"HYDRO_PUMP"],[52,"HYPER_BEAM"]],"e":[]},"131":{"n":"LAPRAS","t":["water","ice"],"s":[130,85,80,60,85,95],"m":["WATER_GUN","GROWL"],"l":[[16,"SING"],[20,"MIST"],[25,"BODY_SLAM"],[31,"CONFUSE_RAY"],[38,"ICE_BEAM"],[46,"HYDRO_PUMP"]],"e":[]},"132":{"n":"DITTO","t":["normal"],"s":[48,48,48,48,48,48],"m":["TRANSFORM"],"l":[],"e":[]},"133":{"n":"EEVEE","t":["normal"],"s":[55,55,50,55,45,65],"m":["TACKLE","SAND_ATTACK"],"l":[[27,"QUICK_ATTACK"],[31,"TAIL_WHIP"],[37,"BITE"],[45,"TAKE_DOWN"]],"e":[134,135,136,196,197]},"134":{"n":"VAPOREON","t":["water"],"s":[130,65,60,65,110,95],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","WATER_GUN"],"l":[[27,"QUICK_ATTACK"],[31,"WATER_GUN"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"ACID_ARMOR"],[44,"HAZE"],[48,"MIST"],[54,"HYDRO_PUMP"]],"e":[]},"135":{"n":"JOLTEON","t":["electric"],"s":[65,65,60,130,110,95],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","THUNDERSHOCK"],"l":[[27,"QUICK_ATTACK"],[31,"THUNDERSHOCK"],[37,"TAIL_WHIP"],[40,"THUNDER_WAVE"],[42,"DOUBLE_KICK"],[44,"AGILITY"],[48,"PIN_MISSILE"],[54,"THUNDER"]],"e":[]},"136":{"n":"FLAREON","t":["fire"],"s":[65,130,60,65,95,110],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","EMBER"],"l":[[27,"QUICK_ATTACK"],[31,"EMBER"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"LEER"],[44,"FIRE_SPIN"],[48,"RAGE"],[54,"FLAMETHROWER"]],"e":[]},"137":{"n":"PORYGON","t":["normal"],"s":[65,60,70,40,85,75],"m":["TACKLE","SHARPEN","CONVERSION"],"l":[[23,"PSYBEAM"],[28,"RECOVER"],[35,"AGILITY"],[42,"TRI_ATTACK"]],"e":[233]},"138":{"n":"OMANYTE","t":["rock","water"],"s":[35,40,100,35,90,55],"m":["WATER_GUN","WITHDRAW"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[46,"SPIKE_CANNON"],[53,"HYDRO_PUMP"]],"e":[139]},"139":{"n":"OMASTAR","t":["rock","water"],"s":[70,60,125,55,115,70],"m":["WATER_GUN","WITHDRAW","HORN_ATTACK"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[44,"SPIKE_CANNON"],[49,"HYDRO_PUMP"]],"e":[]},"140":{"n":"KABUTO","t":["rock","water"],"s":[30,80,90,55,35,45],"m":["SCRATCH","HARDEN"],"l":[[34,"ABSORB"],[39,"SLASH"],[44,"LEER"],[49,"HYDRO_PUMP"]],"e":[141]},"141":{"n":"KABUTOPS","t":["rock","water"],"s":[60,115,105,80,65,70],"m":["SCRATCH","HARDEN","ABSORB"],"l":[[34,"ABSORB"],[39,"SLASH"],[46,"LEER"],[53,"HYDRO_PUMP"]],"e":[]},"142":{"n":"AERODACTYL","t":["rock","flying"],"s":[80,105,65,130,60,75],"m":["WING_ATTACK","AGILITY"],"l":[[33,"SUPERSONIC"],[38,"BITE"],[45,"TAKE_DOWN"],[54,"HYPER_BEAM"]],"e":[]},"143":{"n":"SNORLAX","t":["normal"],"s":[160,110,65,30,65,110],"m":["HEADBUTT","AMNESIA","REST"],"l":[[35,"BODY_SLAM"],[41,"HARDEN"],[48,"DOUBLE_EDGE"],[56,"HYPER_BEAM"]],"e":[]},"144":{"n":"ARTICUNO","t":["ice","flying"],"s":[90,85,100,85,95,125],"m":["PECK","ICE_BEAM"],"l":[[51,"BLIZZARD"],[55,"AGILITY"],[60,"MIST"]],"e":[]},"145":{"n":"ZAPDOS","t":["electric","flying"],"s":[90,90,85,100,125,90],"m":["THUNDERSHOCK","DRILL_PECK"],"l":[[51,"THUNDER"],[55,"AGILITY"],[60,"LIGHT_SCREEN"]],"e":[]},"146":{"n":"MOLTRES","t":["fire","flying"],"s":[90,100,90,90,125,85],"m":["PECK","FIRE_SPIN"],"l":[[51,"LEER"],[55,"AGILITY"],[60,"SKY_ATTACK"]],"e":[]},"147":{"n":"DRATINI","t":["dragon"],"s":[41,64,45,50,50,50],"m":["WRAP","LEER"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[30,"SLAM"],[40,"DRAGON_RAGE"],[50,"HYPER_BEAM"]],"e":[148]},"148":{"n":"DRAGONAIR","t":["dragon"],"s":[61,84,65,70,70,70],"m":["WRAP","LEER","THUNDER_WAVE"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[55,"HYPER_BEAM"]],"e":[149]},"149":{"n":"DRAGONITE","t":["dragon","flying"],"s":[91,134,95,80,100,100],"m":["WRAP","LEER","THUNDER_WAVE","AGILITY"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[60,"HYPER_BEAM"]],"e":[]},"150":{"n":"MEWTWO","t":["psychic"],"s":[106,110,90,130,154,90],"m":["CONFUSION","DISABLE","SWIFT","PSYCHIC_M"],"l":[[63,"BARRIER"],[66,"PSYCHIC_M"],[70,"RECOVER"],[75,"MIST"],[81,"AMNESIA"]],"e":[]},"151":{"n":"MEW","t":["psychic"],"s":[100,100,100,100,100,100],"m":["POUND"],"l":[[10,"TRANSFORM"],[20,"MEGA_PUNCH"],[30,"METRONOME"],[40,"PSYCHIC_M"]],"e":[]},"152":{"n":"CHIKORITA","t":["grass"],"s":[45,49,65,45,49,65],"e":[153],"m":["TACKLE","GROWL"],"l":[[8,"RAZOR_LEAF"],[12,"REFLECT"],[15,"POISONPOWDER"],[22,"SYNTHESIS"],[29,"BODY_SLAM"],[36,"LIGHT_SCREEN"],[43,"SAFEGUARD"],[50,"SOLARBEAM"]]},"153":{"n":"BAYLEEF","t":["grass"],"s":[60,62,80,60,63,80],"e":[154],"m":["TACKLE","GROWL","RAZOR_LEAF","REFLECT"],"l":[[15,"POISONPOWDER"],[22,"SYNTHESIS"],[31,"BODY_SLAM"],[40,"LIGHT_SCREEN"],[51,"SAFEGUARD"],[60,"SOLARBEAM"]]},"154":{"n":"MEGANIUM","t":["grass"],"s":[80,82,100,80,83,100],"e":[],"m":["TACKLE","GROWL","RAZOR_LEAF","REFLECT"],"l":[[15,"POISONPOWDER"],[22,"SYNTHESIS"],[31,"BODY_SLAM"],[41,"LIGHT_SCREEN"],[54,"SAFEGUARD"],[65,"SOLARBEAM"]]},"155":{"n":"CYNDAQUIL","t":["fire"],"s":[39,52,43,65,60,50],"e":[156],"m":["TACKLE","LEER"],"l":[[6,"SMOKESCREEN"],[12,"EMBER"],[19,"QUICK_ATTACK"],[27,"FLAME_WHEEL"],[36,"SWIFT"],[46,"FLAMETHROWER"]]},"156":{"n":"QUILAVA","t":["fire"],"s":[58,64,58,80,80,65],"e":[157],"m":["TACKLE","LEER","SMOKESCREEN","EMBER"],"l":[[24,"QUICK_ATTACK"],[31,"FLAME_WHEEL"],[40,"SWIFT"],[48,"FLAMETHROWER"]]},"157":{"n":"TYPHLOSION","t":["fire"],"s":[78,84,78,100,109,85],"e":[],"m":["TACKLE","LEER","SMOKESCREEN","EMBER"],"l":[[24,"QUICK_ATTACK"],[31,"FLAME_WHEEL"],[43,"SWIFT"],[53,"FLAMETHROWER"]]},"158":{"n":"TOTODILE","t":["water"],"s":[50,65,64,43,44,48],"e":[159],"m":["SCRATCH","LEER"],"l":[[7,"RAGE"],[13,"WATER_GUN"],[20,"BITE"],[27,"SCARY_FACE"],[35,"SLASH"],[43,"SCREECH"],[52,"HYDRO_PUMP"]]},"159":{"n":"CROCONAW","t":["water"],"s":[65,80,80,58,59,63],"e":[160],"m":["SCRATCH","LEER","RAGE","WATER_GUN"],"l":[[21,"BITE"],[28,"SCARY_FACE"],[37,"SLASH"],[45,"SCREECH"],[55,"HYDRO_PUMP"]]},"160":{"n":"FERALIGATR","t":["water"],"s":[85,105,100,78,79,83],"e":[],"m":["SCRATCH","LEER","RAGE","WATER_GUN"],"l":[[21,"BITE"],[28,"SCARY_FACE"],[38,"SLASH"],[47,"SCREECH"],[58,"HYDRO_PUMP"]]},"161":{"n":"SENTRET","t":["normal"],"s":[35,46,34,20,35,45],"e":[162],"m":["SCRATCH"],"l":[[4,"DEFENSE_CURL"],[7,"QUICK_ATTACK"],[12,"FURY_SWIPES"],[17,"SLAM"],[24,"FLAIL"],[31,"REST"],[40,"AMNESIA"]]},"162":{"n":"FURRET","t":["normal"],"s":[85,76,64,90,45,55],"e":[],"m":["SCRATCH","DEFENSE_CURL","QUICK_ATTACK","FURY_SWIPES"],"l":[[19,"SLAM"],[28,"FLAIL"],[37,"REST"],[48,"AMNESIA"]]},"163":{"n":"HOOTHOOT","t":["normal","flying"],"s":[60,30,30,50,36,56],"e":[164],"m":["TACKLE","GROWL"],"l":[[6,"FORESIGHT"],[11,"PECK"],[16,"HYPNOSIS"],[22,"REFLECT"],[28,"TAKE_DOWN"],[34,"CONFUSION"],[48,"DREAM_EATER"]]},"164":{"n":"NOCTOWL","t":["normal","flying"],"s":[100,50,50,70,76,96],"e":[],"m":["TACKLE","GROWL","FORESIGHT","PECK"],"l":[[25,"HYPNOSIS"],[33,"REFLECT"],[41,"TAKE_DOWN"],[49,"CONFUSION"],[57,"DREAM_EATER"]]},"165":{"n":"LEDYBA","t":["bug","flying"],"s":[40,20,30,55,40,80],"e":[166],"m":["TACKLE"],"l":[[8,"SUPERSONIC"],[15,"COMET_PUNCH"],[22,"LIGHT_SCREEN"],[24,"REFLECT"],[26,"SAFEGUARD"],[29,"BATON_PASS"],[36,"SWIFT"],[43,"AGILITY"],[50,"DOUBLE_EDGE"]]},"166":{"n":"LEDIAN","t":["bug","flying"],"s":[55,35,50,85,55,110],"e":[],"m":["TACKLE","SUPERSONIC","COMET_PUNCH"],"l":[[24,"LIGHT_SCREEN"],[26,"REFLECT"],[28,"SAFEGUARD"],[34,"BATON_PASS"],[41,"SWIFT"],[48,"AGILITY"],[55,"DOUBLE_EDGE"]]},"167":{"n":"SPINARAK","t":["bug","poison"],"s":[40,60,40,30,40,40],"e":[168],"m":["POISON_STING","STRING_SHOT"],"l":[[6,"SCARY_FACE"],[11,"CONSTRICT"],[17,"NIGHT_SHADE"],[25,"LEECH_LIFE"],[33,"SPIDER_WEB"],[41,"AGILITY"],[49,"PSYCHIC_M"]]},"168":{"n":"ARIADOS","t":["bug","poison"],"s":[70,90,70,40,60,60],"e":[],"m":["POISON_STING","STRING_SHOT","SCARY_FACE","CONSTRICT"],"l":[[17,"NIGHT_SHADE"],[25,"LEECH_LIFE"],[34,"SPIDER_WEB"],[43,"AGILITY"],[52,"PSYCHIC_M"]]},"169":{"n":"CROBAT","t":["poison","flying"],"s":[85,90,80,130,70,80],"e":[],"m":["LEECH_LIFE","SCREECH","SUPERSONIC","BITE"],"l":[[21,"CONFUSE_RAY"],[28,"WING_ATTACK"],[36,"MEAN_LOOK"],[42,"HAZE"],[48,"DOUBLE_EDGE"]]},"170":{"n":"CHINCHOU","t":["water","electric"],"s":[75,38,38,67,56,56],"e":[171],"m":["BUBBLE","SUPERSONIC"],"l":[[13,"THUNDER_WAVE"],[17,"FLAIL"],[25,"WATER_GUN"],[29,"SPARK"],[37,"CONFUSE_RAY"],[41,"TAKE_DOWN"],[49,"HYDRO_PUMP"]]},"171":{"n":"LANTURN","t":["water","electric"],"s":[125,58,58,67,76,76],"e":[],"m":["BUBBLE","SUPERSONIC","THUNDER_WAVE","FLAIL"],"l":[[27,"WATER_GUN"],[33,"SPARK"],[43,"CONFUSE_RAY"],[49,"TAKE_DOWN"],[57,"HYDRO_PUMP"]]},"172":{"n":"PICHU","t":["electric"],"s":[20,40,15,60,35,35],"e":[25],"m":["THUNDERSHOCK","CHARM"],"l":[[6,"TAIL_WHIP"],[8,"THUNDER_WAVE"],[11,"SWEET_KISS"]]},"173":{"n":"CLEFFA","t":["normal"],"s":[50,25,28,15,45,55],"e":[35],"m":["POUND","CHARM"],"l":[[4,"ENCORE"],[8,"SING"],[13,"SWEET_KISS"],[17,"DEFENSE_CURL"],[20,"PRESENT"],[25,"METRONOME"],[29,"SAFEGUARD"]]},"174":{"n":"IGGLYBUFF","t":["normal"],"s":[90,30,15,15,40,20],"e":[39],"m":["SING","CHARM"],"l":[[4,"DEFENSE_CURL"],[9,"POUND"],[14,"SWEET_KISS"]]},"175":{"n":"TOGEPI","t":["normal"],"s":[35,20,65,20,40,65],"e":[176],"m":["GROWL","CHARM"],"l":[[6,"METRONOME"],[11,"SWEET_KISS"],[16,"ENCORE"],[21,"SAFEGUARD"],[26,"DOUBLE_EDGE"]]},"176":{"n":"TOGETIC","t":["normal","flying"],"s":[55,40,85,40,80,105],"e":[],"m":["GROWL","CHARM","METRONOME","SWEET_KISS"],"l":[[21,"ENCORE"],[26,"SAFEGUARD"],[31,"DOUBLE_EDGE"]]},"177":{"n":"NATU","t":["psychic","flying"],"s":[40,50,45,70,70,45],"e":[178],"m":["PECK","LEER"],"l":[[10,"NIGHT_SHADE"],[20,"TELEPORT"],[30,"FUTURE_SIGHT"],[40,"CONFUSE_RAY"],[50,"PSYCHIC_M"]]},"178":{"n":"XATU","t":["psychic","flying"],"s":[65,75,70,95,95,70],"e":[],"m":["PECK","LEER","NIGHT_SHADE","TELEPORT"],"l":[[30,"FUTURE_SIGHT"],[40,"CONFUSE_RAY"],[50,"PSYCHIC_M"]]},"179":{"n":"MAREEP","t":["electric"],"s":[55,40,40,35,65,45],"e":[180],"m":["TACKLE","GROWL"],"l":[[9,"THUNDERSHOCK"],[16,"THUNDER_WAVE"],[23,"COTTON_SPORE"],[30,"LIGHT_SCREEN"],[37,"THUNDER"]]},"180":{"n":"FLAAFFY","t":["electric"],"s":[70,55,55,45,80,60],"e":[181],"m":["TACKLE","GROWL","THUNDERSHOCK","THUNDER_WAVE"],"l":[[18,"COTTON_SPORE"],[27,"LIGHT_SCREEN"],[36,"THUNDER"]]},"181":{"n":"AMPHAROS","t":["electric"],"s":[90,75,75,55,115,90],"e":[],"m":["TACKLE","GROWL","THUNDERSHOCK","THUNDER_WAVE"],"l":[[18,"COTTON_SPORE"],[30,"LIGHT_SCREEN"],[36,"THUNDERPUNCH"],[42,"THUNDER"]]},"182":{"n":"BELLOSSOM","t":["grass"],"s":[75,80,85,50,90,100],"e":[],"m":["ABSORB","SWEET_SCENT","STUN_SPORE","SLEEP_POWDER"],"l":[[36,"ACID"],[44,"PETAL_DANCE"]]},"183":{"n":"MARILL","t":["water"],"s":[70,20,50,40,20,50],"e":[184],"m":["TACKLE","TAIL_WHIP"],"l":[[3,"DEFENSE_CURL"],[6,"WATER_GUN"],[10,"ROLLOUT"],[15,"BUBBLEBEAM"],[21,"DOUBLE_EDGE"],[28,"RAIN_DANCE"],[36,"HYDRO_PUMP"]]},"184":{"n":"AZUMARILL","t":["water"],"s":[100,50,80,50,60,80],"e":[],"m":["TACKLE","TAIL_WHIP","DEFENSE_CURL","WATER_GUN"],"l":[[10,"ROLLOUT"],[15,"BUBBLEBEAM"],[24,"DOUBLE_EDGE"],[34,"RAIN_DANCE"],[45,"HYDRO_PUMP"]]},"185":{"n":"SUDOWOODO","t":["rock"],"s":[70,100,115,30,30,65],"e":[],"m":["ROCK_THROW","MIMIC"],"l":[[9,"FLAIL"],[17,"LOW_KICK"],[25,"ROCK_SLIDE"],[33,"FAINT_ATTACK"],[41,"SLAM"],[49,"DOUBLE_EDGE"]]},"186":{"n":"POLITOED","t":["water"],"s":[90,75,75,70,90,100],"e":[],"m":["WATER_GUN","HYPNOSIS","DOUBLESLAP","PERISH_SONG"],"l":[[35,"SWAGGER"],[43,"BUBBLEBEAM"],[51,"HYDRO_PUMP"]]},"187":{"n":"HOPPIP","t":["grass","flying"],"s":[35,35,40,50,35,55],"e":[188],"m":["SPLASH"],"l":[[5,"SYNTHESIS"],[10,"TAIL_WHIP"],[13,"TACKLE"],[15,"POISONPOWDER"],[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[30,"LEECH_SEED"],[35,"COTTON_SPORE"]]},"188":{"n":"SKIPLOOM","t":["grass","flying"],"s":[55,45,50,80,45,65],"e":[189],"m":["SPLASH","SYNTHESIS","TAIL_WHIP","TACKLE"],"l":[[15,"POISONPOWDER"],[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[33,"LEECH_SEED"],[43,"COTTON_SPORE"]]},"189":{"n":"JUMPLUFF","t":["grass","flying"],"s":[75,55,70,110,55,85],"e":[],"m":["SYNTHESIS","TAIL_WHIP","TACKLE","POISONPOWDER"],"l":[[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[33,"LEECH_SEED"],[45,"COTTON_SPORE"]]},"190":{"n":"AIPOM","t":["normal"],"s":[55,70,55,85,40,55],"e":[],"m":["SCRATCH","TAIL_WHIP"],"l":[[6,"SAND_ATTACK"],[13,"BATON_PASS"],[18,"FURY_SWIPES"],[26,"SWIFT"],[33,"SCREECH"],[43,"AGILITY"]]},"191":{"n":"SUNKERN","t":["grass"],"s":[30,30,30,30,30,30],"e":[192],"m":["ABSORB"],"l":[[6,"GROWTH"],[13,"MEGA_DRAIN"],[18,"SUNNY_DAY"],[25,"SYNTHESIS"],[30,"GIGA_DRAIN"]]},"192":{"n":"SUNFLORA","t":["grass"],"s":[75,75,55,30,105,85],"e":[],"m":["ABSORB","GROWTH","RAZOR_LEAF","SUNNY_DAY"],"l":[[25,"SYNTHESIS"],[30,"GIGA_DRAIN"],[42,"SOLARBEAM"]]},"193":{"n":"YANMA","t":["bug","flying"],"s":[65,65,45,95,75,45],"e":[],"m":["TACKLE","FORESIGHT"],"l":[[7,"QUICK_ATTACK"],[13,"DOUBLE_TEAM"],[19,"SONICBOOM"],[25,"DETECT"],[31,"SUPERSONIC"],[49,"SCREECH"]]},"194":{"n":"WOOPER","t":["water","ground"],"s":[55,45,45,15,25,25],"e":[195],"m":["WATER_GUN","TAIL_WHIP"],"l":[[11,"SLAM"],[16,"MUD_SLAP"],[21,"AMNESIA"],[31,"EARTHQUAKE"],[36,"RAIN_DANCE"],[41,"MIST"],[51,"HAZE"]]},"195":{"n":"QUAGSIRE","t":["water","ground"],"s":[95,85,85,35,65,65],"e":[],"m":["WATER_GUN","TAIL_WHIP","SLAM","MUD_SLAP"],"l":[[23,"AMNESIA"],[35,"EARTHQUAKE"],[42,"RAIN_DANCE"],[49,"MIST"],[57,"HAZE"]]},"196":{"n":"ESPEON","t":["psychic"],"s":[65,65,60,110,130,95],"e":[],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"SAND_ATTACK"],[16,"QUICK_ATTACK"],[23,"SWIFT"],[30,"PSYBEAM"],[36,"PSYCH_UP"],[42,"PSYCHIC_M"],[47,"MORNING_SUN"]]},"197":{"n":"UMBREON","t":["dark"],"s":[95,65,110,65,60,130],"e":[],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"SAND_ATTACK"],[16,"QUICK_ATTACK"],[23,"PURSUIT"],[30,"FAINT_ATTACK"],[36,"SCREECH"],[42,"MEAN_LOOK"],[47,"MOONLIGHT"]]},"198":{"n":"MURKROW","t":["dark","flying"],"s":[60,85,42,91,85,42],"e":[],"m":["PECK","PURSUIT"],"l":[[16,"HAZE"],[21,"NIGHT_SHADE"],[26,"FAINT_ATTACK"],[31,"WHIRLWIND"],[36,"MEAN_LOOK"],[41,"DRILL_PECK"]]},"199":{"n":"SLOWKING","t":["water","psychic"],"s":[95,75,80,30,100,110],"e":[],"m":["CURSE","TACKLE","GROWL","WATER_GUN"],"l":[[18,"CONFUSION"],[22,"DISABLE"],[27,"HEADBUTT"],[33,"SWAGGER"],[40,"PSYCHIC_M"],[48,"PSYCH_UP"]]},"200":{"n":"MISDREAVUS","t":["ghost"],"s":[60,60,60,85,85,85],"e":[],"m":["GROWL","PSYWAVE"],"l":[[6,"SPITE"],[11,"MEAN_LOOK"],[17,"PSYBEAM"],[23,"PAIN_SPLIT"],[30,"SHADOW_BALL"],[37,"PERISH_SONG"],[45,"DESTINY_BOND"]]},"201":{"n":"UNOWN","t":["psychic"],"s":[48,72,48,48,72,48],"e":[],"m":["HIDDEN_POWER"],"l":[]},"202":{"n":"WOBBUFFET","t":["psychic"],"s":[190,33,58,33,33,58],"e":[],"m":["COUNTER","MIRROR_COAT","SAFEGUARD","DESTINY_BOND"],"l":[]},"203":{"n":"GIRAFARIG","t":["normal","psychic"],"s":[70,80,65,85,90,65],"e":[],"m":["TACKLE","GROWL"],"l":[[7,"CONFUSION"],[13,"STOMP"],[19,"PSYBEAM"],[25,"AGILITY"],[31,"BATON_PASS"],[37,"TAKE_DOWN"],[43,"PSYCHIC_M"]]},"204":{"n":"PINECO","t":["bug"],"s":[50,65,90,15,35,35],"e":[205],"m":["TACKLE","PROTECT"],"l":[[8,"SELFDESTRUCT"],[15,"TAKE_DOWN"],[22,"RAPID_SPIN"],[29,"BIDE"],[36,"EXPLOSION"],[43,"SPIKES"],[50,"DOUBLE_EDGE"]]},"205":{"n":"FORRETRESS","t":["bug","steel"],"s":[75,90,140,40,60,60],"e":[],"m":["TACKLE","PROTECT","SELFDESTRUCT","TAKE_DOWN"],"l":[[23,"RAPID_SPIN"],[31,"BIDE"],[39,"EXPLOSION"],[47,"SPIKES"],[55,"DOUBLE_EDGE"]]},"206":{"n":"DUNSPARCE","t":["normal"],"s":[100,70,70,45,65,65],"e":[],"m":["RAGE"],"l":[[4,"DEFENSE_CURL"],[10,"GLARE"],[19,"ROLLOUT"],[25,"SPITE"],[31,"SCREECH"],[37,"TAKE_DOWN"],[43,"ENDURE"],[49,"DOUBLE_EDGE"]]},"207":{"n":"GLIGAR","t":["ground","flying"],"s":[65,75,105,85,35,65],"e":[],"m":["POISON_STING"],"l":[[6,"SAND_ATTACK"],[13,"HARDEN"],[20,"QUICK_ATTACK"],[28,"FAINT_ATTACK"],[36,"SLASH"],[44,"SCREECH"],[52,"GUILLOTINE"]]},"208":{"n":"STEELIX","t":["steel","ground"],"s":[75,85,200,30,55,65],"e":[],"m":["TACKLE","SCREECH","BIND","ROCK_THROW"],"l":[[19,"HARDEN"],[25,"RAGE"],[31,"SANDSTORM"],[37,"SLAM"],[43,"IRON_TAIL"],[49,"SCREECH"],[55,"DOUBLE_EDGE"]]},"209":{"n":"SNUBBULL","t":["normal"],"s":[60,80,50,30,40,40],"e":[210],"m":["TACKLE","SCARY_FACE"],"l":[[8,"TAIL_WHIP"],[13,"CHARM"],[19,"BITE"],[26,"LICK"],[34,"ROAR"],[43,"RAGE"],[53,"CRUNCH"]]},"210":{"n":"GRANBULL","t":["normal"],"s":[90,120,75,45,60,60],"e":[],"m":["TACKLE","SCARY_FACE","TAIL_WHIP","CHARM"],"l":[[19,"BITE"],[28,"LICK"],[38,"ROAR"],[49,"RAGE"],[61,"TAKE_DOWN"]]},"211":{"n":"QWILFISH","t":["water","poison"],"s":[65,95,75,85,55,55],"e":[],"m":["TACKLE","POISON_STING"],"l":[[9,"HARDEN"],[13,"MINIMIZE"],[20,"WATER_GUN"],[28,"PIN_MISSILE"],[36,"TAKE_DOWN"],[44,"HYDRO_PUMP"]]},"212":{"n":"SCIZOR","t":["bug","steel"],"s":[70,130,100,65,55,80],"e":[],"m":["QUICK_ATTACK","LEER","FOCUS_ENERGY","PURSUIT"],"l":[[21,"FALSE_SWIPE"],[26,"AGILITY"],[31,"METAL_CLAW"],[36,"SLASH"],[41,"SWORDS_DANCE"],[46,"DOUBLE_TEAM"]]},"213":{"n":"SHUCKLE","t":["bug","rock"],"s":[20,10,230,5,10,230],"e":[],"m":["CONSTRICT","WITHDRAW"],"l":[[9,"WRAP"],[14,"ENCORE"],[23,"SAFEGUARD"],[28,"BIDE"],[37,"REST"]]},"214":{"n":"HERACROSS","t":["bug","fighting"],"s":[80,125,75,85,40,95],"e":[],"m":["TACKLE","LEER"],"l":[[6,"HORN_ATTACK"],[11,"ENDURE"],[17,"FURY_ATTACK"],[23,"COUNTER"],[30,"TAKE_DOWN"],[37,"REVERSAL"],[45,"MEGAHORN"]]},"215":{"n":"SNEASEL","t":["dark","ice"],"s":[55,95,55,115,35,75],"e":[],"m":["SCRATCH","LEER"],"l":[[8,"QUICK_ATTACK"],[15,"SCREECH"],[22,"FAINT_ATTACK"],[29,"FURY_SWIPES"],[36,"AGILITY"],[43,"ICY_WIND"],[50,"SLASH"]]},"216":{"n":"TEDDIURSA","t":["normal"],"s":[60,80,50,40,50,50],"e":[217],"m":["SCRATCH","LEER"],"l":[[8,"LICK"],[15,"FURY_SWIPES"],[22,"FAINT_ATTACK"],[29,"REST"],[36,"SLASH"],[43,"SNORE"],[50,"THRASH"]]},"217":{"n":"URSARING","t":["normal"],"s":[90,130,75,55,75,75],"e":[],"m":["SCRATCH","LEER","LICK","FURY_SWIPES"],"l":[[25,"FAINT_ATTACK"],[32,"REST"],[41,"SLASH"],[50,"SNORE"],[59,"THRASH"]]},"218":{"n":"SLUGMA","t":["fire"],"s":[40,40,40,20,70,40],"e":[219],"m":["SMOG"],"l":[[8,"EMBER"],[15,"ROCK_THROW"],[22,"HARDEN"],[29,"AMNESIA"],[36,"FLAMETHROWER"],[43,"ROCK_SLIDE"],[50,"BODY_SLAM"]]},"219":{"n":"MAGCARGO","t":["fire","rock"],"s":[50,50,120,30,80,80],"e":[],"m":["SMOG","EMBER","ROCK_THROW","HARDEN"],"l":[[29,"AMNESIA"],[36,"FLAMETHROWER"],[48,"ROCK_SLIDE"],[60,"BODY_SLAM"]]},"220":{"n":"SWINUB","t":["ice","ground"],"s":[50,50,40,50,30,30],"e":[221],"m":["TACKLE"],"l":[[10,"POWDER_SNOW"],[16,"ENDURE"],[19,"TAKE_DOWN"],[28,"MIST"],[37,"BLIZZARD"],[46,"AMNESIA"]]},"221":{"n":"PILOSWINE","t":["ice","ground"],"s":[100,100,80,50,60,60],"e":[],"m":["TACKLE","POWDER_SNOW","ENDURE","TAKE_DOWN"],"l":[[28,"FURY_ATTACK"],[33,"MIST"],[42,"BLIZZARD"],[56,"AMNESIA"]]},"222":{"n":"CORSOLA","t":["water","rock"],"s":[55,55,85,35,65,85],"e":[],"m":["TACKLE"],"l":[[6,"HARDEN"],[12,"BUBBLE"],[17,"RECOVER"],[23,"BUBBLEBEAM"],[28,"SPIKE_CANNON"],[34,"ROCK_SLIDE"],[39,"MIRROR_COAT"],[45,"ANCIENTPOWER"]]},"223":{"n":"REMORAID","t":["water"],"s":[35,65,35,65,65,35],"e":[224],"m":["WATER_GUN"],"l":[[11,"LOCK_ON"],[22,"PSYBEAM"],[27,"AURORA_BEAM"],[33,"BUBBLEBEAM"],[38,"FOCUS_ENERGY"],[44,"HYPER_BEAM"]]},"224":{"n":"OCTILLERY","t":["water"],"s":[75,105,75,45,105,75],"e":[],"m":["WATER_GUN","CONSTRICT","PSYBEAM","AURORA_BEAM"],"l":[[25,"OCTAZOOKA"],[33,"BUBBLEBEAM"],[41,"FOCUS_ENERGY"],[50,"HYPER_BEAM"]]},"225":{"n":"DELIBIRD","t":["ice","flying"],"s":[45,55,45,75,65,45],"e":[],"m":["PRESENT"],"l":[]},"226":{"n":"MANTINE","t":["water","flying"],"s":[65,40,70,70,80,140],"e":[],"m":["TACKLE","BUBBLE"],"l":[[8,"SUPERSONIC"],[15,"BUBBLEBEAM"],[22,"TAKE_DOWN"],[29,"AGILITY"],[36,"WING_ATTACK"],[43,"WATER_GUN"],[50,"HYDRO_PUMP"]]},"227":{"n":"SKARMORY","t":["steel","flying"],"s":[65,80,140,70,40,70],"e":[],"m":["LEER","PECK"],"l":[[13,"SAND_ATTACK"],[19,"SWIFT"],[25,"AGILITY"],[37,"FURY_ATTACK"],[49,"STEEL_WING"]]},"228":{"n":"HOUNDOUR","t":["dark","fire"],"s":[45,60,30,65,80,50],"e":[229],"m":["LEER","EMBER"],"l":[[7,"ROAR"],[13,"SMOG"],[19,"BITE"],[25,"FAINT_ATTACK"],[31,"FLAMETHROWER"],[37,"CRUNCH"]]},"229":{"n":"HOUNDOOM","t":["dark","fire"],"s":[75,90,50,95,110,80],"e":[],"m":["LEER","EMBER","ROAR","SMOG"],"l":[[19,"BITE"],[35,"FAINT_ATTACK"],[43,"FLAMETHROWER"],[51,"CRUNCH"]]},"230":{"n":"KINGDRA","t":["water","dragon"],"s":[75,95,95,85,95,95],"e":[],"m":["BUBBLE","SMOKESCREEN","LEER","WATER_GUN"],"l":[[35,"DRAGONBREATH"],[40,"AGILITY"],[48,"HYDRO_PUMP"]]},"231":{"n":"PHANPY","t":["ground"],"s":[90,60,60,40,40,40],"e":[232],"m":["TACKLE","GROWL"],"l":[[9,"DEFENSE_CURL"],[17,"FLAIL"],[25,"ROLLOUT"],[33,"ENDURE"],[41,"TAKE_DOWN"],[49,"DOUBLE_EDGE"]]},"232":{"n":"DONPHAN","t":["ground"],"s":[90,120,120,50,60,60],"e":[],"m":["HORN_ATTACK","GROWL","DEFENSE_CURL","FLAIL"],"l":[[25,"ROLLOUT"],[33,"FURY_ATTACK"],[41,"TAKE_DOWN"],[49,"EARTHQUAKE"]]},"233":{"n":"PORYGON2","t":["normal"],"s":[85,80,90,60,105,95],"e":[],"m":["CONVERSION2","TACKLE","CONVERSION","SHARPEN"],"l":[[23,"PSYBEAM"],[28,"RECOVER"],[35,"AGILITY"],[42,"TRI_ATTACK"]]},"234":{"n":"STANTLER","t":["normal"],"s":[73,95,62,85,85,65],"e":[],"m":["TACKLE","LEER"],"l":[[7,"HYPNOSIS"],[13,"STOMP"],[19,"SAND_ATTACK"],[25,"TAKE_DOWN"],[31,"CONFUSE_RAY"],[37,"PSYCH_UP"],[43,"DOUBLE_EDGE"]]},"235":{"n":"SMEARGLE","t":["normal"],"s":[55,20,35,75,20,45],"e":[],"m":["TACKLE","SPLASH","MIMIC","METRONOME"],"l":[]},"236":{"n":"TYROGUE","t":["fighting"],"s":[35,35,35,35,35,35],"e":[106,107,237],"m":["TACKLE"],"l":[]},"237":{"n":"HITMONTOP","t":["fighting"],"s":[50,95,95,70,35,110],"e":[],"m":["ROLLING_KICK","FOCUS_ENERGY","PURSUIT","QUICK_ATTACK"],"l":[[20,"RAPID_SPIN"],[25,"COUNTER"],[32,"AGILITY"],[40,"TRIPLE_KICK"],[48,"DETECT"]]},"238":{"n":"SMOOCHUM","t":["ice","psychic"],"s":[45,30,15,65,85,65],"e":[124],"m":["POUND","LICK"],"l":[[9,"SWEET_KISS"],[13,"POWDER_SNOW"],[21,"CONFUSION"],[25,"SING"],[33,"MEAN_LOOK"],[37,"FAINT_ATTACK"],[45,"PSYCHIC_M"],[49,"PERISH_SONG"]]},"239":{"n":"ELEKID","t":["electric"],"s":[45,63,37,95,65,55],"e":[125],"m":["QUICK_ATTACK","LEER"],"l":[[9,"THUNDERPUNCH"],[17,"LIGHT_SCREEN"],[25,"SWIFT"],[33,"SCREECH"],[41,"THUNDERBOLT"],[49,"THUNDER"]]},"240":{"n":"MAGBY","t":["fire"],"s":[45,75,37,83,70,55],"e":[126],"m":["EMBER"],"l":[[7,"LEER"],[13,"SMOG"],[19,"FIRE_PUNCH"],[25,"SMOKESCREEN"],[31,"SUNNY_DAY"],[37,"FLAMETHROWER"],[43,"CONFUSE_RAY"],[49,"FIRE_BLAST"]]},"241":{"n":"MILTANK","t":["normal"],"s":[95,80,105,100,40,70],"e":[],"m":["TACKLE","GROWL"],"l":[[8,"STOMP"],[13,"MILK_DRINK"],[19,"BIDE"],[26,"ROLLOUT"],[34,"BODY_SLAM"],[43,"HEAL_BELL"]]},"242":{"n":"BLISSEY","t":["normal"],"s":[255,10,10,55,75,135],"e":[],"m":["POUND","GROWL","TAIL_WHIP","SOFTBOILED"],"l":[[13,"DOUBLESLAP"],[23,"MINIMIZE"],[33,"SING"],[44,"EGG_BOMB"]]},"243":{"n":"RAIKOU","t":["electric"],"s":[90,85,75,115,115,100],"e":[],"m":["THUNDERSHOCK","ROAR","LEER","QUICK_ATTACK"],"l":[[21,"SPARK"],[31,"REFLECT"],[41,"CRUNCH"],[51,"THUNDER"]]},"244":{"n":"ENTEI","t":["fire"],"s":[115,115,85,100,90,75],"e":[],"m":["EMBER","ROAR","LEER","STOMP"],"l":[[21,"FIRE_SPIN"],[31,"SWAGGER"],[41,"FLAMETHROWER"],[51,"CRUNCH"]]},"245":{"n":"SUICUNE","t":["water"],"s":[100,75,115,85,90,115],"e":[],"m":["BUBBLEBEAM","RAIN_DANCE","GUST","AURORA_BEAM"],"l":[[21,"MIST"],[31,"MIRROR_COAT"],[41,"HYDRO_PUMP"]]},"246":{"n":"LARVITAR","t":["rock","ground"],"s":[50,64,50,41,45,50],"e":[247],"m":["BITE","LEER"],"l":[[8,"SANDSTORM"],[15,"SCREECH"],[22,"ROCK_SLIDE"],[29,"THRASH"],[36,"SCARY_FACE"],[43,"CRUNCH"],[50,"EARTHQUAKE"]]},"247":{"n":"PUPITAR","t":["rock","ground"],"s":[70,84,70,51,65,70],"e":[248],"m":["BITE","LEER","SANDSTORM","SCREECH"],"l":[[22,"ROCK_SLIDE"],[30,"THRASH"],[38,"SCARY_FACE"],[46,"CRUNCH"],[54,"EARTHQUAKE"]]},"248":{"n":"TYRANITAR","t":["rock","dark"],"s":[100,134,110,61,95,100],"e":[],"m":["BITE","LEER","SANDSTORM","SCREECH"],"l":[[22,"ROCK_SLIDE"],[30,"THRASH"],[38,"SCARY_FACE"],[46,"CRUNCH"],[54,"EARTHQUAKE"],[61,"HYPER_BEAM"]]},"249":{"n":"LUGIA","t":["psychic","flying"],"s":[106,90,130,110,90,154],"e":[],"m":["AEROBLAST","SAFEGUARD","GUST","RECOVER"],"l":[[20,"RAIN_DANCE"],[30,"HYDRO_PUMP"],[40,"ANCIENTPOWER"],[50,"FUTURE_SIGHT"]]},"250":{"n":"HO-OH","t":["fire","flying"],"s":[106,130,90,90,110,154],"e":[],"m":["SACRED_FIRE","SAFEGUARD","GUST","RECOVER"],"l":[[20,"SUNNY_DAY"],[30,"FIRE_BLAST"],[40,"ANCIENTPOWER"],[50,"FUTURE_SIGHT"]]},"251":{"n":"CELEBI","t":["psychic","grass"],"s":[100,100,100,100,100,100],"e":[],"m":["LEECH_SEED","CONFUSION","RECOVER","HEAL_BELL"],"l":[[20,"SAFEGUARD"],[30,"ANCIENTPOWER"],[40,"FUTURE_SIGHT"],[50,"BATON_PASS"]]}},"moves":{"POUND":{"n":"POUND","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"KARATE_CHOP":{"n":"KARATE CHOP","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"fighting","a":100,"pp":25,"hc":1},"DOUBLESLAP":{"n":"DOUBLESLAP","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":10},"COMET_PUNCH":{"n":"COMET PUNCH","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":85,"pp":15},"MEGA_PUNCH":{"n":"MEGA PUNCH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":85,"pp":20},"PAY_DAY":{"n":"PAY DAY","e":"PAY_DAY_EFFECT","p":40,"t":"normal","a":100,"pp":20},"FIRE_PUNCH":{"n":"FIRE PUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"fire","a":100,"pp":15,"sec":[{"k":"brn","c":10}]},"ICE_PUNCH":{"n":"ICE PUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"ice","a":100,"pp":15,"sec":[{"k":"frz","c":10}]},"THUNDERPUNCH":{"n":"THUNDERPUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"electric","a":100,"pp":15,"sec":[{"k":"par","c":10}]},"SCRATCH":{"n":"SCRATCH","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"VICEGRIP":{"n":"VICEGRIP","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"normal","a":100,"pp":30},"GUILLOTINE":{"n":"GUILLOTINE","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"RAZOR_WIND":{"n":"RAZOR WIND","e":"CHARGE_EFFECT","p":80,"t":"normal","a":75,"pp":10},"SWORDS_DANCE":{"n":"SWORDS DANCE","e":"ATTACK_UP2_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"CUT":{"n":"CUT","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"normal","a":95,"pp":30},"GUST":{"n":"GUST","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"flying","a":100,"pp":35},"WING_ATTACK":{"n":"WING ATTACK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"WHIRLWIND":{"n":"WHIRLWIND","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":85,"pp":20,"self":1},"FLY":{"n":"FLY","e":"FLY_EFFECT","p":70,"t":"flying","a":95,"pp":15},"BIND":{"n":"BIND","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":75,"pp":20},"SLAM":{"n":"SLAM","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":75,"pp":20},"VINE_WHIP":{"n":"VINE WHIP","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"grass","a":100,"pp":10},"STOMP":{"n":"STOMP","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"normal","a":100,"pp":20,"sec":[{"k":"flinch","c":30}]},"DOUBLE_KICK":{"n":"DOUBLE KICK","e":"ATTACK_TWICE_EFFECT","p":30,"t":"fighting","a":100,"pp":30},"MEGA_KICK":{"n":"MEGA KICK","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"normal","a":75,"pp":5},"JUMP_KICK":{"n":"JUMP KICK","e":"JUMP_KICK_EFFECT","p":70,"t":"fighting","a":95,"pp":25},"ROLLING_KICK":{"n":"ROLLING KICK","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"fighting","a":85,"pp":15,"sec":[{"k":"flinch","c":30}]},"SAND_ATTACK":{"n":"SAND-ATTACK","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"ground","a":100,"pp":15},"HEADBUTT":{"n":"HEADBUTT","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":15,"sec":[{"k":"flinch","c":30}]},"HORN_ATTACK":{"n":"HORN ATTACK","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"normal","a":100,"pp":25},"FURY_ATTACK":{"n":"FURY ATTACK","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"HORN_DRILL":{"n":"HORN DRILL","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"TACKLE":{"n":"TACKLE","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"normal","a":95,"pp":35},"BODY_SLAM":{"n":"BODY SLAM","e":"NO_ADDITIONAL_EFFECT","p":85,"t":"normal","a":100,"pp":15,"sec":[{"k":"par","c":30}]},"WRAP":{"n":"WRAP","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":85,"pp":20},"TAKE_DOWN":{"n":"TAKE DOWN","e":"RECOIL_EFFECT","p":90,"t":"normal","a":85,"pp":20},"THRASH":{"n":"THRASH","e":"THRASH_PETAL_DANCE_EFFECT","p":90,"t":"normal","a":100,"pp":20},"DOUBLE_EDGE":{"n":"DOUBLE-EDGE","e":"RECOIL_EFFECT","p":100,"t":"normal","a":100,"pp":15},"TAIL_WHIP":{"n":"TAIL WHIP","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"POISON_STING":{"n":"POISON STING","e":"NO_ADDITIONAL_EFFECT","p":15,"t":"poison","a":100,"pp":35,"sec":[{"k":"psn","c":30}]},"TWINEEDLE":{"n":"TWINEEDLE","e":"ATTACK_TWICE_EFFECT","p":25,"t":"bug","a":100,"pp":20,"sec":[{"k":"psn","c":20}]},"PIN_MISSILE":{"n":"PIN MISSILE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":14,"t":"bug","a":85,"pp":20},"LEER":{"n":"LEER","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"BITE":{"n":"BITE","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dark","a":100,"pp":25,"sec":[{"k":"flinch","c":30}]},"GROWL":{"n":"GROWL","e":"ATTACK_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":40},"ROAR":{"n":"ROAR","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"SING":{"n":"SING","e":"SLEEP_EFFECT","p":0,"t":"normal","a":55,"pp":15},"SUPERSONIC":{"n":"SUPERSONIC","e":"CONFUSION_EFFECT","p":0,"t":"normal","a":55,"pp":20},"SONICBOOM":{"n":"SONICBOOM","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"normal","a":90,"pp":20},"DISABLE":{"n":"DISABLE","e":"DISABLE_EFFECT","p":0,"t":"normal","a":55,"pp":20},"ACID":{"n":"ACID","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"poison","a":100,"pp":30,"sec":[{"k":"stat","st":"def","d":-1,"c":10}]},"EMBER":{"n":"EMBER","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"fire","a":100,"pp":25,"sec":[{"k":"brn","c":10}]},"FLAMETHROWER":{"n":"FLAMETHROWER","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"fire","a":100,"pp":15,"sec":[{"k":"brn","c":10}]},"MIST":{"n":"MIST","e":"MIST_EFFECT","p":0,"t":"ice","a":100,"pp":30,"self":1},"WATER_GUN":{"n":"WATER GUN","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"water","a":100,"pp":25},"HYDRO_PUMP":{"n":"HYDRO PUMP","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"water","a":80,"pp":5},"SURF":{"n":"SURF","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"water","a":100,"pp":15},"ICE_BEAM":{"n":"ICE BEAM","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"ice","a":100,"pp":10,"sec":[{"k":"frz","c":10}]},"BLIZZARD":{"n":"BLIZZARD","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"ice","a":90,"pp":5,"sec":[{"k":"frz","c":10}]},"PSYBEAM":{"n":"PSYBEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"psychic","a":100,"pp":20,"sec":[{"k":"cnf","c":10}]},"BUBBLEBEAM":{"n":"BUBBLEBEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"water","a":100,"pp":20,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"AURORA_BEAM":{"n":"AURORA BEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"ice","a":100,"pp":20,"sec":[{"k":"stat","st":"atk","d":-1,"c":10}]},"HYPER_BEAM":{"n":"HYPER BEAM","e":"HYPER_BEAM_EFFECT","p":150,"t":"normal","a":90,"pp":5},"PECK":{"n":"PECK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"DRILL_PECK":{"n":"DRILL PECK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"flying","a":100,"pp":20},"SUBMISSION":{"n":"SUBMISSION","e":"RECOIL_EFFECT","p":80,"t":"fighting","a":80,"pp":25},"LOW_KICK":{"n":"LOW KICK","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"fighting","a":90,"pp":20,"sec":[{"k":"flinch","c":30}]},"COUNTER":{"n":"COUNTER","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"fighting","a":100,"pp":20,"pri":-1,"x":"counter"},"SEISMIC_TOSS":{"n":"SEISMIC TOSS","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"fighting","a":100,"pp":20},"STRENGTH":{"n":"STRENGTH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":15},"ABSORB":{"n":"ABSORB","e":"DRAIN_HP_EFFECT","p":20,"t":"grass","a":100,"pp":20},"MEGA_DRAIN":{"n":"MEGA DRAIN","e":"DRAIN_HP_EFFECT","p":40,"t":"grass","a":100,"pp":10},"LEECH_SEED":{"n":"LEECH SEED","e":"LEECH_SEED_EFFECT","p":0,"t":"grass","a":90,"pp":10},"GROWTH":{"n":"GROWTH","e":"SPA_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"RAZOR_LEAF":{"n":"RAZOR LEAF","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"grass","a":95,"pp":25,"hc":1},"SOLARBEAM":{"n":"SOLARBEAM","e":"CHARGE_EFFECT","p":120,"t":"grass","a":100,"pp":10},"POISONPOWDER":{"n":"POISONPOWDER","e":"POISON_EFFECT","p":0,"t":"poison","a":75,"pp":35},"STUN_SPORE":{"n":"STUN SPORE","e":"PARALYZE_EFFECT","p":0,"t":"grass","a":75,"pp":30},"SLEEP_POWDER":{"n":"SLEEP POWDER","e":"SLEEP_EFFECT","p":0,"t":"grass","a":75,"pp":15},"PETAL_DANCE":{"n":"PETAL DANCE","e":"THRASH_PETAL_DANCE_EFFECT","p":70,"t":"grass","a":100,"pp":20},"STRING_SHOT":{"n":"STRING SHOT","e":"SPEED_DOWN1_EFFECT","p":0,"t":"bug","a":95,"pp":40},"DRAGON_RAGE":{"n":"DRAGON RAGE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"dragon","a":100,"pp":10},"FIRE_SPIN":{"n":"FIRE SPIN","e":"TRAPPING_EFFECT","p":15,"t":"fire","a":70,"pp":15},"THUNDERSHOCK":{"n":"THUNDERSHOCK","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"electric","a":100,"pp":30,"sec":[{"k":"par","c":10}]},"THUNDERBOLT":{"n":"THUNDERBOLT","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"electric","a":100,"pp":15,"sec":[{"k":"par","c":10}]},"THUNDER_WAVE":{"n":"THUNDER WAVE","e":"PARALYZE_EFFECT","p":0,"t":"electric","a":100,"pp":20},"THUNDER":{"n":"THUNDER","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"electric","a":70,"pp":10,"sec":[{"k":"par","c":10}]},"ROCK_THROW":{"n":"ROCK THROW","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"rock","a":65,"pp":15},"EARTHQUAKE":{"n":"EARTHQUAKE","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"ground","a":100,"pp":10},"FISSURE":{"n":"FISSURE","e":"OHKO_EFFECT","p":1,"t":"ground","a":30,"pp":5},"DIG":{"n":"DIG","e":"CHARGE_EFFECT","p":100,"t":"ground","a":100,"pp":10},"TOXIC":{"n":"TOXIC","e":"POISON_EFFECT","p":0,"t":"poison","a":85,"pp":10},"CONFUSION":{"n":"CONFUSION","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"psychic","a":100,"pp":25,"sec":[{"k":"cnf","c":10}]},"PSYCHIC_M":{"n":"PSYCHIC","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"psychic","a":100,"pp":10,"sec":[{"k":"stat","st":"sdf","d":-1,"c":10}]},"HYPNOSIS":{"n":"HYPNOSIS","e":"SLEEP_EFFECT","p":0,"t":"psychic","a":60,"pp":20},"MEDITATE":{"n":"MEDITATE","e":"ATTACK_UP1_EFFECT","p":0,"t":"psychic","a":100,"pp":40,"self":1},"AGILITY":{"n":"AGILITY","e":"SPEED_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"QUICK_ATTACK":{"n":"QUICK ATTACK","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":30,"pri":1},"RAGE":{"n":"RAGE","e":"RAGE_EFFECT","p":20,"t":"normal","a":100,"pp":20},"TELEPORT":{"n":"TELEPORT","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"NIGHT_SHADE":{"n":"NIGHT SHADE","e":"SPECIAL_DAMAGE_EFFECT","p":0,"t":"ghost","a":100,"pp":15},"MIMIC":{"n":"MIMIC","e":"MIMIC_EFFECT","p":0,"t":"normal","a":100,"pp":10},"SCREECH":{"n":"SCREECH","e":"DEFENSE_DOWN2_EFFECT","p":0,"t":"normal","a":85,"pp":40},"DOUBLE_TEAM":{"n":"DOUBLE TEAM","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":15,"self":1},"RECOVER":{"n":"RECOVER","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"HARDEN":{"n":"HARDEN","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"MINIMIZE":{"n":"MINIMIZE","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"SMOKESCREEN":{"n":"SMOKESCREEN","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"CONFUSE_RAY":{"n":"CONFUSE RAY","e":"CONFUSION_EFFECT","p":0,"t":"ghost","a":100,"pp":10},"WITHDRAW":{"n":"WITHDRAW","e":"DEFENSE_UP1_EFFECT","p":0,"t":"water","a":100,"pp":40,"self":1},"DEFENSE_CURL":{"n":"DEFENSE CURL","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"BARRIER":{"n":"BARRIER","e":"DEFENSE_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"LIGHT_SCREEN":{"n":"LIGHT SCREEN","e":"LIGHT_SCREEN_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"HAZE":{"n":"HAZE","e":"HAZE_EFFECT","p":0,"t":"ice","a":100,"pp":30,"self":1},"REFLECT":{"n":"REFLECT","e":"REFLECT_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"FOCUS_ENERGY":{"n":"FOCUS ENERGY","e":"FOCUS_ENERGY_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"BIDE":{"n":"BIDE","e":"BIDE_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"METRONOME":{"n":"METRONOME","e":"METRONOME_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"MIRROR_MOVE":{"n":"MIRROR MOVE","e":"MIRROR_MOVE_EFFECT","p":0,"t":"flying","a":100,"pp":20,"self":1},"SELFDESTRUCT":{"n":"SELFDESTRUCT","e":"EXPLODE_EFFECT","p":200,"t":"normal","a":100,"pp":5},"EGG_BOMB":{"n":"EGG BOMB","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"normal","a":75,"pp":10},"LICK":{"n":"LICK","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"ghost","a":100,"pp":30,"sec":[{"k":"par","c":30}]},"SMOG":{"n":"SMOG","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"poison","a":70,"pp":20,"sec":[{"k":"psn","c":40}]},"SLUDGE":{"n":"SLUDGE","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"poison","a":100,"pp":20,"sec":[{"k":"psn","c":30}]},"BONE_CLUB":{"n":"BONE CLUB","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"ground","a":85,"pp":20,"sec":[{"k":"flinch","c":10}]},"FIRE_BLAST":{"n":"FIRE BLAST","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"fire","a":85,"pp":5,"sec":[{"k":"brn","c":10}]},"WATERFALL":{"n":"WATERFALL","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"water","a":100,"pp":15,"sec":[{"k":"flinch","c":20}]},"CLAMP":{"n":"CLAMP","e":"TRAPPING_EFFECT","p":35,"t":"water","a":75,"pp":10},"SWIFT":{"n":"SWIFT","e":"SWIFT_EFFECT","p":60,"t":"normal","a":100,"pp":20,"nm":1},"SKULL_BASH":{"n":"SKULL BASH","e":"CHARGE_EFFECT","p":100,"t":"normal","a":100,"pp":15},"SPIKE_CANNON":{"n":"SPIKE CANNON","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":20,"t":"normal","a":100,"pp":15},"CONSTRICT":{"n":"CONSTRICT","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"normal","a":100,"pp":35,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"AMNESIA":{"n":"AMNESIA","e":"SDF_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"KINESIS":{"n":"KINESIS","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"psychic","a":80,"pp":15},"SOFTBOILED":{"n":"SOFTBOILED","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"HI_JUMP_KICK":{"n":"HI JUMP KICK","e":"JUMP_KICK_EFFECT","p":85,"t":"fighting","a":90,"pp":20},"GLARE":{"n":"GLARE","e":"PARALYZE_EFFECT","p":0,"t":"normal","a":75,"pp":30},"DREAM_EATER":{"n":"DREAM EATER","e":"DREAM_EATER_EFFECT","p":100,"t":"psychic","a":100,"pp":15},"POISON_GAS":{"n":"POISON GAS","e":"POISON_EFFECT","p":0,"t":"poison","a":55,"pp":40},"BARRAGE":{"n":"BARRAGE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"LEECH_LIFE":{"n":"LEECH LIFE","e":"DRAIN_HP_EFFECT","p":20,"t":"bug","a":100,"pp":15},"LOVELY_KISS":{"n":"LOVELY KISS","e":"SLEEP_EFFECT","p":0,"t":"normal","a":75,"pp":10},"SKY_ATTACK":{"n":"SKY ATTACK","e":"CHARGE_EFFECT","p":140,"t":"flying","a":90,"pp":5,"sec":[{"k":"flinch","c":30}]},"TRANSFORM":{"n":"TRANSFORM","e":"TRANSFORM_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":0},"BUBBLE":{"n":"BUBBLE","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"water","a":100,"pp":30,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"DIZZY_PUNCH":{"n":"DIZZY PUNCH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":10},"SPORE":{"n":"SPORE","e":"SLEEP_EFFECT","p":0,"t":"grass","a":100,"pp":15},"FLASH":{"n":"FLASH","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":70,"pp":20},"PSYWAVE":{"n":"PSYWAVE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"psychic","a":80,"pp":15},"SPLASH":{"n":"SPLASH","e":"SPLASH_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"ACID_ARMOR":{"n":"ACID ARMOR","e":"DEFENSE_UP2_EFFECT","p":0,"t":"poison","a":100,"pp":40,"self":1},"CRABHAMMER":{"n":"CRABHAMMER","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"water","a":85,"pp":10,"hc":1},"EXPLOSION":{"n":"EXPLOSION","e":"EXPLODE_EFFECT","p":250,"t":"normal","a":100,"pp":5},"FURY_SWIPES":{"n":"FURY SWIPES","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":80,"pp":15},"BONEMERANG":{"n":"BONEMERANG","e":"ATTACK_TWICE_EFFECT","p":50,"t":"ground","a":90,"pp":10},"REST":{"n":"REST","e":"HEAL_EFFECT","p":0,"t":"psychic","a":100,"pp":10,"self":1},"ROCK_SLIDE":{"n":"ROCK SLIDE","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"rock","a":90,"pp":10,"sec":[{"k":"flinch","c":30}]},"HYPER_FANG":{"n":"HYPER FANG","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":90,"pp":15,"sec":[{"k":"flinch","c":10}]},"SHARPEN":{"n":"SHARPEN","e":"ATTACK_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"CONVERSION":{"n":"CONVERSION","e":"CONVERSION_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"TRI_ATTACK":{"n":"TRI ATTACK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":10},"SUPER_FANG":{"n":"SUPER FANG","e":"SUPER_FANG_EFFECT","p":1,"t":"normal","a":90,"pp":10},"SLASH":{"n":"SLASH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":20,"hc":1},"SUBSTITUTE":{"n":"SUBSTITUTE","e":"SUBSTITUTE_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"STRUGGLE":{"n":"STRUGGLE","e":"RECOIL_EFFECT","p":50,"t":"normal","a":100,"pp":10},"TRIPLE_KICK":{"n":"TRIPLE KICK","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"fighting","a":90,"pp":10,"x":"triple_kick"},"THIEF":{"n":"THIEF","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dark","a":100,"pp":10},"SPIDER_WEB":{"n":"SPIDER WEB","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"bug","a":100,"pp":10,"x":"mean_look"},"MIND_READER":{"n":"MIND READER","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"lock_on"},"NIGHTMARE":{"n":"NIGHTMARE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":15,"x":"nightmare"},"FLAME_WHEEL":{"n":"FLAME WHEEL","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"fire","a":100,"pp":25,"sec":[{"k":"brn","c":10}],"thaw":1},"SNORE":{"n":"SNORE","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":15,"x":"snore","sec":[{"k":"flinch","c":30}]},"CURSE":{"n":"CURSE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"curse","self":1},"FLAIL":{"n":"FLAIL","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":15,"x":"flail"},"CONVERSION2":{"n":"CONVERSION2","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":30,"x":"conversion2","self":1},"AEROBLAST":{"n":"AEROBLAST","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"flying","a":95,"pp":5,"hc":1},"COTTON_SPORE":{"n":"COTTON SPORE","e":"SPEED_DOWN2_EFFECT","p":0,"t":"grass","a":85,"pp":40},"REVERSAL":{"n":"REVERSAL","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"fighting","a":100,"pp":15,"x":"flail"},"SPITE":{"n":"SPITE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":10,"x":"spite"},"POWDER_SNOW":{"n":"POWDER SNOW","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"ice","a":100,"pp":25,"sec":[{"k":"frz","c":10}]},"PROTECT":{"n":"PROTECT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"protect","pri":3,"self":1},"MACH_PUNCH":{"n":"MACH PUNCH","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"fighting","a":100,"pp":30,"pri":1},"SCARY_FACE":{"n":"SCARY FACE","e":"SPEED_DOWN2_EFFECT","p":0,"t":"normal","a":90,"pp":10},"FAINT_ATTACK":{"n":"FAINT ATTACK","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dark","a":100,"pp":20,"nm":1},"SWEET_KISS":{"n":"SWEET KISS","e":"CONFUSION_EFFECT","p":0,"t":"normal","a":75,"pp":10},"BELLY_DRUM":{"n":"BELLY DRUM","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"belly_drum","self":1},"SLUDGE_BOMB":{"n":"SLUDGE BOMB","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"poison","a":100,"pp":10,"sec":[{"k":"psn","c":30}]},"MUD_SLAP":{"n":"MUD-SLAP","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"ground","a":100,"pp":10,"sec":[{"k":"stat","st":"acc","d":-1,"c":100}]},"OCTAZOOKA":{"n":"OCTAZOOKA","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"water","a":85,"pp":10,"sec":[{"k":"stat","st":"acc","d":-1,"c":50}]},"SPIKES":{"n":"SPIKES","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ground","a":100,"pp":20,"x":"fail","self":1},"ZAP_CANNON":{"n":"ZAP CANNON","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"electric","a":50,"pp":5,"sec":[{"k":"par","c":100}]},"FORESIGHT":{"n":"FORESIGHT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":40,"x":"foresight"},"DESTINY_BOND":{"n":"DESTINY BOND","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":5,"x":"destiny","self":1},"PERISH_SONG":{"n":"PERISH SONG","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"perish","self":1},"ICY_WIND":{"n":"ICY WIND","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"ice","a":95,"pp":15,"sec":[{"k":"stat","st":"spd","d":-1,"c":100}]},"DETECT":{"n":"DETECT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"fighting","a":100,"pp":5,"x":"protect","pri":3,"self":1},"BONE_RUSH":{"n":"BONE RUSH","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":25,"t":"ground","a":80,"pp":10},"LOCK_ON":{"n":"LOCK-ON","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"lock_on"},"OUTRAGE":{"n":"OUTRAGE","e":"THRASH_PETAL_DANCE_EFFECT","p":90,"t":"dragon","a":100,"pp":15},"SANDSTORM":{"n":"SANDSTORM","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"rock","a":100,"pp":10,"x":"sandstorm","self":1},"GIGA_DRAIN":{"n":"GIGA DRAIN","e":"DRAIN_HP_EFFECT","p":60,"t":"grass","a":100,"pp":5},"ENDURE":{"n":"ENDURE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"endure","pri":3,"self":1},"CHARM":{"n":"CHARM","e":"ATTACK_DOWN2_EFFECT","p":0,"t":"normal","a":100,"pp":20},"ROLLOUT":{"n":"ROLLOUT","e":"NO_ADDITIONAL_EFFECT","p":30,"t":"rock","a":90,"pp":20,"x":"rollout"},"FALSE_SWIPE":{"n":"FALSE SWIPE","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":40,"x":"false_swipe"},"SWAGGER":{"n":"SWAGGER","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":90,"pp":15,"x":"swagger"},"MILK_DRINK":{"n":"MILK DRINK","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"SPARK":{"n":"SPARK","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"electric","a":100,"pp":20,"sec":[{"k":"par","c":30}]},"FURY_CUTTER":{"n":"FURY CUTTER","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"bug","a":95,"pp":20,"x":"fury_cutter"},"STEEL_WING":{"n":"STEEL WING","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"steel","a":90,"pp":25,"sec":[{"k":"stat","st":"def","d":1,"c":10,"self":1}]},"MEAN_LOOK":{"n":"MEAN LOOK","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"mean_look"},"ATTRACT":{"n":"ATTRACT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":15,"x":"fail","self":1},"SLEEP_TALK":{"n":"SLEEP TALK","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"sleep_talk","self":1},"HEAL_BELL":{"n":"HEAL BELL","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_bell","self":1},"RETURN":{"n":"RETURN","e":"NO_ADDITIONAL_EFFECT","p":102,"t":"normal","a":100,"pp":20},"PRESENT":{"n":"PRESENT","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":90,"pp":15,"x":"present"},"FRUSTRATION":{"n":"FRUSTRATION","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":20},"SAFEGUARD":{"n":"SAFEGUARD","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":25,"x":"safeguard","self":1},"PAIN_SPLIT":{"n":"PAIN SPLIT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":20,"x":"pain_split"},"SACRED_FIRE":{"n":"SACRED FIRE","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fire","a":95,"pp":5,"sec":[{"k":"brn","c":50}],"thaw":1},"MAGNITUDE":{"n":"MAGNITUDE","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"ground","a":100,"pp":30,"x":"magnitude"},"DYNAMICPUNCH":{"n":"DYNAMICPUNCH","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fighting","a":50,"pp":5,"sec":[{"k":"cnf","c":100}]},"MEGAHORN":{"n":"MEGAHORN","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"bug","a":85,"pp":10},"DRAGONBREATH":{"n":"DRAGONBREATH","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dragon","a":100,"pp":20,"sec":[{"k":"par","c":30}]},"BATON_PASS":{"n":"BATON PASS","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":40,"x":"fail","self":1},"ENCORE":{"n":"ENCORE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"encore"},"PURSUIT":{"n":"PURSUIT","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dark","a":100,"pp":20},"RAPID_SPIN":{"n":"RAPID SPIN","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"normal","a":100,"pp":40,"x":"rapid_spin"},"SWEET_SCENT":{"n":"SWEET SCENT","e":"EVASION_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"IRON_TAIL":{"n":"IRON TAIL","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"steel","a":75,"pp":15,"sec":[{"k":"stat","st":"def","d":-1,"c":30}]},"METAL_CLAW":{"n":"METAL CLAW","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"steel","a":95,"pp":35,"sec":[{"k":"stat","st":"atk","d":1,"c":10,"self":1}]},"VITAL_THROW":{"n":"VITAL THROW","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"fighting","a":100,"pp":10,"pri":-1,"nm":1},"MORNING_SUN":{"n":"MORNING SUN","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_weather","self":1},"SYNTHESIS":{"n":"SYNTHESIS","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"grass","a":100,"pp":5,"x":"heal_weather","self":1},"MOONLIGHT":{"n":"MOONLIGHT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_weather","self":1},"HIDDEN_POWER":{"n":"HIDDEN POWER","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":15,"x":"hidden_power"},"CROSS_CHOP":{"n":"CROSS CHOP","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fighting","a":80,"pp":5,"hc":1},"TWISTER":{"n":"TWISTER","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dragon","a":100,"pp":20,"sec":[{"k":"flinch","c":20}]},"RAIN_DANCE":{"n":"RAIN DANCE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"water","a":90,"pp":5,"x":"rain","self":1},"SUNNY_DAY":{"n":"SUNNY DAY","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"fire","a":90,"pp":5,"x":"sun","self":1},"CRUNCH":{"n":"CRUNCH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"dark","a":100,"pp":15,"sec":[{"k":"stat","st":"sdf","d":-1,"c":20}]},"MIRROR_COAT":{"n":"MIRROR COAT","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"psychic","a":100,"pp":20,"x":"mirror_coat","pri":-1},"PSYCH_UP":{"n":"PSYCH UP","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"psych_up","self":1},"EXTREMESPEED":{"n":"EXTREMESPEED","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":5,"pri":2},"ANCIENTPOWER":{"n":"ANCIENTPOWER","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"rock","a":100,"pp":5,"sec":[{"k":"allstats","c":10,"self":1}]},"SHADOW_BALL":{"n":"SHADOW BALL","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"ghost","a":100,"pp":15,"sec":[{"k":"stat","st":"sdf","d":-1,"c":20}]},"FUTURE_SIGHT":{"n":"FUTURE SIGHT","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"psychic","a":90,"pp":15,"x":"future_sight"},"ROCK_SMASH":{"n":"ROCK SMASH","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"fighting","a":100,"pp":15,"sec":[{"k":"stat","st":"def","d":-1,"c":50}]},"WHIRLPOOL":{"n":"WHIRLPOOL","e":"TRAPPING_EFFECT","p":15,"t":"water","a":70,"pp":15},"BEAT_UP":{"n":"BEAT UP","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"dark","a":100,"pp":10}},"chart":[["normal","rock",5],["normal","steel",5],["normal","ghost",0],["fire","fire",5],["fire","water",5],["fire","grass",20],["fire","ice",20],["fire","bug",20],["fire","rock",5],["fire","dragon",5],["fire","steel",20],["water","fire",20],["water","water",5],["water","grass",5],["water","ground",20],["water","rock",20],["water","dragon",5],["electric","water",20],["electric","electric",5],["electric","grass",5],["electric","ground",0],["electric","flying",20],["electric","dragon",5],["grass","fire",5],["grass","water",20],["grass","grass",5],["grass","poison",5],["grass","ground",20],["grass","flying",5],["grass","bug",5],["grass","rock",20],["grass","dragon",5],["grass","steel",5],["ice","water",5],["ice","grass",20],["ice","ice",5],["ice","ground",20],["ice","flying",20],["ice","dragon",20],["ice","fire",5],["ice","steel",5],["fighting","normal",20],["fighting","ice",20],["fighting","poison",5],["fighting","flying",5],["fighting","psychic",5],["fighting","bug",5],["fighting","rock",20],["fighting","ghost",0],["fighting","dark",20],["fighting","steel",20],["poison","grass",20],["poison","poison",5],["poison","ground",5],["poison","rock",5],["poison","ghost",5],["poison","steel",0],["ground","fire",20],["ground","electric",20],["ground","grass",5],["ground","poison",20],["ground","flying",0],["ground","bug",5],["ground","rock",20],["ground","steel",20],["flying","electric",5],["flying","grass",20],["flying","fighting",20],["flying","bug",20],["flying","rock",5],["flying","steel",5],["psychic","fighting",20],["psychic","poison",20],["psychic","psychic",5],["psychic","dark",0],["psychic","steel",5],["bug","fire",5],["bug","grass",20],["bug","fighting",5],["bug","poison",5],["bug","flying",5],["bug","psychic",20],["bug","ghost",5],["bug","dark",20],["bug","steel",5],["rock","fire",20],["rock","ice",20],["rock","fighting",5],["rock","ground",5],["rock","flying",20],["rock","bug",20],["rock","steel",5],["ghost","normal",0],["ghost","psychic",20],["ghost","ghost",20],["ghost","dark",5],["ghost","steel",5],["dragon","dragon",20],["dragon","steel",5],["dark","fighting",5],["dark","psychic",20],["dark","ghost",20],["dark","dark",5],["dark","steel",5],["steel","fire",5],["steel","water",5],["steel","electric",5],["steel","ice",20],["steel","rock",20],["steel","steel",5]]};
 
 // ===================================================================
-// GEN 1 (POKÉMON RED/BLUE) STATS + BATTLE ENGINE
-// Game data (base stats, types, moves, learnsets, type chart) was
-// extracted from the pret/pokered disassembly. Formulas follow the
-// original game code (damage, crits, accuracy, status, stat stages).
+// GEN 2 (POKÉMON GOLD/SILVER/CRYSTAL) DATA + BATTLE ENGINE
+// 251 Pokémon, Gen 2 type chart (Dark + Steel), Special Attack / Special Defense split,
+// Gen 2 damage formula, critical hits, status, weather, Protect/Endure/Encore/Perish Song...
 // ===================================================================
-const G1_LEVEL = 50; // every Pokémon in the bot is level 50
-const G1_PHYSICAL = new Set(['normal', 'fighting', 'flying', 'poison', 'ground', 'rock', 'bug', 'ghost']);
-const G1_RATIOS = [[25, 100], [28, 100], [33, 100], [40, 100], [50, 100], [66, 100], [1, 1], [15, 10], [2, 1], [25, 10], [3, 1], [35, 10], [4, 1]];
-const G1_HIGH_CRIT = new Set(['KARATE_CHOP', 'RAZOR_LEAF', 'CRABHAMMER', 'SLASH']);
-const G1_STAT_NAMES = { atk: 'ATTACK', def: 'DEFENSE', spd: 'SPEED', spc: 'SPECIAL', acc: 'ACCURACY', eva: 'EVASION' };
-const G1_STAT_KEYS = { ATTACK: 'atk', DEFENSE: 'def', SPEED: 'spd', SPECIAL: 'spc', ACCURACY: 'acc', EVASION: 'eva' };
-const G1_CHARGE_TEXT = {
+const G2_LEVEL = 50; // every Pokémon in the bot is level 50
+const G2_SPECIAL_TYPES = new Set(['fire', 'water', 'grass', 'electric', 'ice', 'psychic', 'dragon', 'dark']);
+const G2_RATIOS = [[25, 100], [28, 100], [33, 100], [40, 100], [50, 100], [66, 100], [1, 1], [15, 10], [2, 1], [25, 10], [3, 1], [35, 10], [4, 1]];
+const G2_ACC_RATIOS = [[33, 100], [36, 100], [43, 100], [50, 100], [60, 100], [75, 100], [1, 1], [133, 100], [166, 100], [2, 1], [233, 100], [266, 100], [3, 1]];
+const G2_CRIT_RATES = [17, 32, 64, 85, 128]; // out of 256, by crit stage
+const G2_STAT_NAMES = { atk: 'ATTACK', def: 'DEFENSE', spd: 'SPEED', spa: 'SP. ATK', sdf: 'SP. DEF', acc: 'ACCURACY', eva: 'EVASION' };
+const G2_STAT_KEYS = { ATTACK: 'atk', DEFENSE: 'def', SPEED: 'spd', SPA: 'spa', SDF: 'sdf', ACCURACY: 'acc', EVASION: 'eva' };
+const G2_CHARGE_TEXT = {
   RAZOR_WIND: 'made a whirlwind!', SOLARBEAM: 'took in sunlight!', SKULL_BASH: 'lowered its head!',
   SKY_ATTACK: 'is glowing!', FLY: 'flew up high!', DIG: 'dug a hole!'
 };
-const G1_FIXED_DAMAGE = new Set(['SPECIAL_DAMAGE_EFFECT', 'SUPER_FANG_EFFECT', 'OHKO_EFFECT']);
+const G2_HP_TYPES = ['fighting', 'flying', 'poison', 'ground', 'rock', 'bug', 'ghost', 'steel', 'fire', 'water', 'grass', 'electric', 'psychic', 'ice', 'dragon', 'dark'];
+const G2_FRESH_STAGES = () => ({ atk: 0, def: 0, spd: 0, spa: 0, sdf: 0, acc: 0, eva: 0 });
 
-const g1Rb = (rng) => Math.floor(rng() * 256); // BattleRandom: 0-255
+const G2_CHART = {};
+for (const [a, d, r] of GEN2.chart) { (G2_CHART[a] = G2_CHART[a] || {})[d] = r; }
+function g2TypeMult(atkType, defType) { return (G2_CHART[atkType] && G2_CHART[atkType][defType] !== undefined) ? G2_CHART[atkType][defType] : 10; }
+
+const g2Rb = (rng) => Math.floor(rng() * 256); // BattleRandom: 0-255
 
 // ---------- stats / creation ----------
-function g1LearnMoves(species, level) {
+function g2LearnMoves(species, level) {
   const known = species.m.slice();
   for (const [lv, mv] of species.l) {
     if (lv > level) break;
@@ -224,24 +229,34 @@ function g1LearnMoves(species, level) {
   return known;
 }
 
-function g1MoveEntry(key) {
-  const m = GEN1.moves[key];
-  return { k: key, name: m.n, type: m.t, power: m.p, acc: m.a, pp: m.pp, maxPp: m.pp };
+function g2MoveEntry(key, dvs) {
+  const m = GEN2.moves[key];
+  const e = { k: key, name: m.n, type: m.t, power: m.p, acc: m.a, pp: m.pp, maxPp: m.pp };
+  if (key === 'HIDDEN_POWER' && dvs) { const hp = g2HiddenPower(dvs); e.type = hp.type; e.power = hp.power; }
+  return e;
 }
 
-function g1CreateMon(dexId, isShiny = null, rng = Math.random, uid = null) {
-  const sp = GEN1.mons[dexId];
+// Hidden Power (Gen 2): type and power come from the Pokémon's DVs
+function g2HiddenPower(dv) {
+  const type = G2_HP_TYPES[((dv.atk & 3) << 2) | (dv.def & 3)];
+  const top = (v) => (v >= 8 ? 1 : 0);
+  const power = Math.floor((5 * (top(dv.atk) + 2 * top(dv.def) + 4 * top(dv.spd) + 8 * top(dv.spc)) + (dv.spc & 3)) / 2) + 31;
+  return { type, power };
+}
+
+function g2CreateMon(dexId, isShiny = null, rng = Math.random, uid = null) {
+  const sp = GEN2.mons[dexId];
   const dv = { atk: Math.floor(rng() * 16), def: Math.floor(rng() * 16), spd: Math.floor(rng() * 16), spc: Math.floor(rng() * 16) };
   dv.hp = ((dv.atk & 1) << 3) | ((dv.def & 1) << 2) | ((dv.spd & 1) << 1) | (dv.spc & 1);
-  const L = G1_LEVEL;
-  // Gen 1 stat formula with 0 stat experience
+  const L = G2_LEVEL;
+  // Gen 2 stat formula with 0 stat experience (Special DV is shared by Sp. Atk and Sp. Def)
   const calc = (base, d, isHp) => {
     const core = Math.floor(((base + d) * 2) * L / 100);
     return isHp ? core + L + 10 : core + 5;
   };
   const stats = {
     hp: calc(sp.s[0], dv.hp, true), atk: calc(sp.s[1], dv.atk), def: calc(sp.s[2], dv.def),
-    spd: calc(sp.s[3], dv.spd), spc: calc(sp.s[4], dv.spc)
+    spd: calc(sp.s[3], dv.spd), spa: calc(sp.s[4], dv.spc), sdf: calc(sp.s[5], dv.spc)
   };
   return {
     uid: uid || Math.random().toString(36).substring(2, 8).toUpperCase(),
@@ -254,140 +269,173 @@ function g1CreateMon(dexId, isShiny = null, rng = Math.random, uid = null) {
     stats,
     hp: stats.hp,
     maxHp: stats.hp,
-    moves: g1LearnMoves(sp, L).map(g1MoveEntry),
-    gen1: true
+    moves: g2LearnMoves(sp, L).map((k) => g2MoveEntry(k, dv)),
+    gen2: true
   };
 }
 
-// Old saved Pokémon (from before the Gen 1 update) are rebuilt with real Gen 1 stats, keeping species, shiny and uid.
-function g1EnsureMon(mon) {
-  if (mon && mon.gen1 === true && mon.stats && mon.moves && mon.moves[0] && mon.moves[0].k) return mon;
-  return g1CreateMon(mon.id, Boolean(mon.isShiny), Math.random, mon.uid);
+// Pokémon saved before the Gen 2 update are rebuilt with real Gen 2 stats and moves, keeping species, shiny and uid.
+function g2EnsureMon(mon) {
+  if (mon && mon.gen2 === true && mon.stats && mon.moves && mon.moves[0] && mon.moves[0].k && GEN2.mons[mon.id]) return mon;
+  return g2CreateMon(mon.id, Boolean(mon.isShiny), Math.random, mon.uid);
 }
 
 // ---------- battle mon ----------
-function g1BattleMon(mon) {
+function g2BattleMon(mon) {
   return {
+    v2: true,
     uid: mon.uid, id: mon.id, speciesId: mon.id, spriteId: mon.id, name: mon.name, isShiny: Boolean(mon.isShiny),
     types: mon.types.slice(), level: mon.level, stats: { ...mon.stats }, maxHp: mon.stats.hp, currentHp: mon.stats.hp,
-    stages: { atk: 0, def: 0, spd: 0, spc: 0, acc: 0, eva: 0 },
+    dvs: mon.dvs || null,
+    stages: G2_FRESH_STAGES(),
     status: null, sleep: 0, badly: false, toxic: 0,
     conf: 0, flinch: false, recharge: false, seeded: false, mist: false, focus: false, reflect: false, lscreen: false,
     sub: 0, disabled: null, disabledTurns: 0, charging: null, invuln: false,
     trapping: false, trapLeft: 0, trapDmg: 0, trapKey: null, thrash: 0, thrashKey: null, rage: false, bide: null,
-    lastMove: null, counterDmg: 0,
+    lastMove: null, hitTaken: null,
+    protect: false, protectN: 0, endure: false, destiny: false, lockOn: false, foresight: false, nightmare: false, cursed: false,
+    perish: 0, encore: null, safeguard: 0, rollN: 0, furyN: 0, future: null, noEscape: false,
     moves: mon.moves.map((m) => ({ ...m, pp: m.maxPp }))
   };
 }
 
-function g1ModStat(m, s) {
-  const [n, d] = G1_RATIOS[m.stages[s] + 6];
+function g2ModStat(m, s) {
+  const [n, d] = G2_RATIOS[m.stages[s] + 6];
   return Math.max(1, Math.min(999, Math.floor(m.stats[s] * n / d)));
 }
-function g1Stat(m, s) {
-  let v = g1ModStat(m, s);
+function g2Stat(m, s) {
+  let v = g2ModStat(m, s);
   if (s === 'atk' && m.status === 'brn') v = Math.max(1, v >> 1);
   if (s === 'spd' && m.status === 'par') v = Math.max(1, v >> 2);
   return v;
 }
 
 // ---------- damage ----------
-function g1RawDamage(level, power, atk, def) {
-  let dmg = Math.floor(Math.floor(Math.floor((Math.floor(2 * level / 5) + 2) * power * atk) / Math.max(1, def)) / 50);
-  return Math.min(997, dmg) + 2;
+function g2RawDamage(level, power, atk, def) {
+  const base = Math.floor(Math.floor(Math.floor(2 * level / 5 + 2) * power * atk / Math.max(1, def)) / 50);
+  return Math.min(997, base);
 }
 
-function g1Damage(A, D, mv, crit, explode) {
-  const special = !G1_PHYSICAL.has(mv.t);
-  let atk, def;
-  if (crit) {
-    atk = A.stats[special ? 'spc' : 'atk'];
-    def = D.stats[special ? 'spc' : 'def'];
+// Gen 2 damage: base -> critical x2 -> +2 -> weather -> STAB -> type effectiveness (applied by the caller's random roll)
+function g2Damage(ctx, A, D, mv, crit, o = {}) {
+  const special = G2_SPECIAL_TYPES.has(mv.t);
+  const oKey = special ? 'spa' : 'atk', dKey = special ? 'sdf' : 'def';
+  const power = o.power !== undefined ? o.power : mv.p;
+  let atk, def, screens = true;
+  if (crit && A.stages[oKey] <= D.stages[dKey]) {
+    // a critical hit ignores stat changes (and screens) when they would not help the attacker
+    atk = A.stats[oKey]; def = D.stats[dKey]; screens = false;
+    if (oKey === 'atk' && A.status === 'brn') atk = Math.max(1, atk >> 1);
   } else {
-    atk = g1Stat(A, special ? 'spc' : 'atk');
-    def = g1Stat(D, special ? 'spc' : 'def');
-    if (!special && D.reflect) def *= 2;
-    if (special && D.lscreen) def *= 2;
+    atk = g2Stat(A, oKey); def = g2Stat(D, dKey);
   }
+  if (screens && !special && D.reflect) def *= 2;
+  if (screens && special && D.lscreen) def *= 2;
   if (atk > 255 || def > 255) { atk = Math.max(1, atk >> 2); def = Math.max(1, def >> 2); }
-  if (explode) def = Math.max(1, def >> 1);
-  let dmg = g1RawDamage(A.level * (crit ? 2 : 1), mv.p, atk, def);
+  if (o.explode) def = Math.max(1, def >> 1);
+  let dmg = g2RawDamage(A.level, power, atk, def);
+  if (crit) dmg *= 2;
+  dmg += 2;
+  const w = ctx.B.weather;
+  if (w && w.turns > 0) {
+    if (w.k === 'rain') { if (mv.t === 'water') dmg += dmg >> 1; else if (mv.t === 'fire') dmg >>= 1; }
+    if (w.k === 'sun') { if (mv.t === 'fire') dmg += dmg >> 1; else if (mv.t === 'water') dmg >>= 1; }
+  }
   if (A.types.includes(mv.t)) dmg += dmg >> 1; // STAB
   let mult = 1;
-  for (const [at, dt, r] of GEN1.chart) {
-    if (at === mv.t && D.types.includes(dt)) { dmg = Math.floor(dmg * r / 10); mult *= r / 10; }
+  for (const dt of D.types) {
+    let r = g2TypeMult(mv.t, dt);
+    if (r === 0 && D.foresight && dt === 'ghost' && (mv.t === 'normal' || mv.t === 'fighting')) r = 10;
+    dmg = Math.floor(dmg * r / 10); mult *= r / 10;
   }
-  return { dmg, mult };
+  return { dmg, mult, special };
 }
 
-function g1CritThreshold(A, key) {
-  const b0 = Math.floor(GEN1.mons[A.speciesId].s[3] / 2);
-  let b = A.focus ? (b0 >> 1) : Math.min(255, b0 * 2); // Focus Energy bug: quarters the crit rate
-  if (G1_HIGH_CRIT.has(key)) { b = Math.min(255, b * 2); b = Math.min(255, b * 2); } else { b = b >> 1; }
-  return b;
+function g2CritStage(A, mv) {
+  let st = 0;
+  if (A.focus) st += 1;
+  if (mv.hc) st += 1;
+  return Math.min(4, st);
 }
 
-function g1HitCheck(A, D, mv, rng) {
+function g2HitCheck(ctx, A, D, mv) {
+  if (A.lockOn) { A.lockOn = false; return true; }
+  if (mv.nm) return true;
   let acc = Math.floor(mv.a * 255 / 100);
-  let [n, d] = G1_RATIOS[A.stages.acc + 6];
+  let [n, d] = G2_ACC_RATIOS[A.stages.acc + 6];
   acc = Math.max(1, Math.floor(acc * n / d));
-  [n, d] = G1_RATIOS[-D.stages.eva + 6];
+  const eva = D.foresight ? Math.min(0, D.stages.eva) : D.stages.eva;
+  [n, d] = G2_ACC_RATIOS[-eva + 6];
   acc = Math.max(1, Math.floor(acc * n / d));
   acc = Math.min(255, acc);
-  return g1Rb(rng) < acc; // even 100% moves miss 1/256 of the time (Gen 1 quirk)
+  return g2Rb(ctx.rng) < acc; // even 100% moves miss 1/256 of the time (Gen 2 keeps this quirk)
 }
 
 // ---------- helpers ----------
-function g1Hurt(ctx, A, D, dmg, mv) {
+function g2Hurt(ctx, A, D, dmg, mv, special) {
   if (D.sub > 0) {
     if (dmg >= D.sub) { D.sub = 0; ctx.say(`${D.name}'s SUBSTITUTE broke!`); }
     else { D.sub -= dmg; ctx.say('The SUBSTITUTE took the hit!'); }
-    if (mv && (mv.t === 'normal' || mv.t === 'fighting')) D.counterDmg = dmg;
+    D.hitTaken = { dmg, special: Boolean(special) };
     return 0;
   }
-  const dealt = Math.min(dmg, D.currentHp);
+  let dealt = Math.min(dmg, D.currentHp);
+  if (D.endure && dealt >= D.currentHp && D.currentHp > 1) { dealt = D.currentHp - 1; ctx.say(`${D.name} endured the hit!`); }
   D.currentHp -= dealt;
-  if (mv && (mv.t === 'normal' || mv.t === 'fighting')) D.counterDmg = dmg;
+  D.hitTaken = { dmg, special: Boolean(special) };
   if (D.bide) D.bide.accum += dmg;
   if (D.rage && D.currentHp > 0 && mv && mv.p > 0 && D.stages.atk < 6) {
     D.stages.atk++;
     ctx.say(`${D.name}'s RAGE is building!`);
   }
+  if (D.currentHp <= 0 && D.destiny) { A.currentHp = 0; ctx.say(`${D.name} took ${A.name} down with it!`); }
   return dealt;
 }
 
-function g1ClearVolatile(A) {
-  A.charging = null; A.invuln = false; A.trapping = false; A.trapLeft = 0; A.thrash = 0; A.bide = null;
+function g2ClearVolatile(A) {
+  A.charging = null; A.invuln = false; A.trapping = false; A.trapLeft = 0; A.thrash = 0; A.bide = null; A.rollN = 0;
 }
 
-function g1Heal(M, amt) { M.currentHp = Math.min(M.maxHp, M.currentHp + amt); }
+function g2Heal(M, amt) { M.currentHp = Math.min(M.maxHp, M.currentHp + amt); }
 
-function g1StatChange(ctx, M, stat, delta, byOther) {
+function g2StatChange(ctx, M, stat, delta, byOther) {
   const s = M.stages[stat];
+  const real = ['atk', 'def', 'spd', 'spa', 'sdf'].includes(stat);
   if (delta > 0) {
     if (s >= 6) { ctx.say('Nothing happened!'); return false; }
-    if (['atk', 'def', 'spd', 'spc'].includes(stat) && g1ModStat(M, stat) >= 999) { ctx.say('Nothing happened!'); return false; }
+    if (real && g2ModStat(M, stat) >= 999) { ctx.say('Nothing happened!'); return false; }
     M.stages[stat] = Math.min(6, s + delta);
-    ctx.say(`${M.name}'s ${G1_STAT_NAMES[stat]} ${delta > 1 ? 'greatly ' : ''}rose!`);
+    ctx.say(`${M.name}'s ${G2_STAT_NAMES[stat]} ${delta > 1 ? 'sharply ' : ''}rose!`);
     return true;
   }
   if (s <= -6) { if (!byOther.silent) ctx.say('Nothing happened!'); return false; }
-  if (['atk', 'def', 'spd', 'spc'].includes(stat) && g1ModStat(M, stat) <= 1) { if (!byOther.silent) ctx.say('Nothing happened!'); return false; }
+  if (real && g2ModStat(M, stat) <= 1) { if (!byOther.silent) ctx.say('Nothing happened!'); return false; }
   M.stages[stat] = Math.max(-6, s + delta);
-  ctx.say(`${M.name}'s ${G1_STAT_NAMES[stat]} ${delta < -1 ? 'greatly ' : ''}fell!`);
+  ctx.say(`${M.name}'s ${G2_STAT_NAMES[stat]} ${delta < -1 ? 'sharply ' : ''}fell!`);
   return true;
 }
 
-function g1RollConfusion(rng) { return 2 + (g1Rb(rng) & 3); }
-function g1RollMulti(rng) {
-  let r = g1Rb(rng) & 3;
-  if (r >= 2) r = g1Rb(rng) & 3;
-  return r; // 0-3
+function g2RollConfusion(rng) { return 2 + (g2Rb(rng) & 3); }
+function g2RollMulti(rng) { // 2-5 hits: 3/8, 3/8, 1/8, 1/8
+  const r = g2Rb(rng) & 7;
+  return r < 3 ? 0 : r < 6 ? 1 : r < 7 ? 2 : 3;
+}
+
+// can this Pokémon get a major status right now?
+function g2CanStatus(D) { return D.status === null && !(D.safeguard > 0) && !(D.sub > 0); }
+
+function g2SetStatus(ctx, D, kind, from) {
+  if (kind === 'psn') { if (D.types.includes('poison') || D.types.includes('steel')) return false; D.status = 'psn'; ctx.say(`${D.name} was poisoned!`); }
+  else if (kind === 'brn') { if (D.types.includes('fire')) return false; D.status = 'brn'; ctx.say(`${D.name} was burned!`); }
+  else if (kind === 'frz') { if (D.types.includes('ice')) return false; D.status = 'frz'; D.recharge = false; ctx.say(`${D.name} was frozen solid!`); }
+  else if (kind === 'par') { D.status = 'par'; ctx.say(`${D.name} is paralyzed! It may not attack!`); }
+  else return false;
+  return true;
 }
 
 // ---------- executing a move ----------
-function g1Exec(ctx, A, D, key, o = {}) {
-  const mv = GEN1.moves[key];
+function g2Exec(ctx, A, D, key, o = {}) {
+  const mv = GEN2.moves[key];
   const say = ctx.say;
   if (!o.noText) say(`${A.name} used ${mv.n}!`);
   if (!o.noPP) {
@@ -395,67 +443,137 @@ function g1Exec(ctx, A, D, key, o = {}) {
     if (slot && slot.pp > 0) slot.pp--;
   }
   if (!o.noRecord) A.lastMove = key;
+  if (key !== 'FURY_CUTTER') A.furyN = 0;
+  if (key !== 'ROLLOUT') A.rollN = 0;
+  if (key !== 'PROTECT' && key !== 'DETECT' && key !== 'ENDURE') A.protectN = 0;
   const e = mv.e;
 
   if (e === 'MIRROR_MOVE_EFFECT') {
     const c = D.lastMove;
     if (!c || c === 'MIRROR_MOVE') { say('But it failed!'); return; }
-    return g1Exec(ctx, A, D, c, { noPP: true, noRecord: true });
+    return g2Exec(ctx, A, D, c, { noPP: true, noRecord: true });
   }
   if (e === 'METRONOME_EFFECT') {
-    const pool = Object.keys(GEN1.moves).filter((k) => k !== 'METRONOME' && k !== 'STRUGGLE');
+    const bad = new Set(['METRONOME', 'STRUGGLE', 'SLEEP_TALK', 'MIRROR_MOVE', 'COUNTER', 'MIRROR_COAT', 'PROTECT', 'DETECT', 'ENDURE', 'DESTINY_BOND', 'ENCORE', 'MIMIC']);
+    const pool = Object.keys(GEN2.moves).filter((k) => !bad.has(k));
     const pick = pool[Math.floor(ctx.rng() * pool.length)];
-    return g1Exec(ctx, A, D, pick, { noPP: true, noRecord: true });
+    return g2Exec(ctx, A, D, pick, { noPP: true, noRecord: true });
   }
 
-  // two-turn moves
+  // two-turn moves (Solarbeam skips the charge turn in sunlight)
   if (!o.charged && (e === 'CHARGE_EFFECT' || e === 'FLY_EFFECT')) {
-    A.charging = key;
-    if (key === 'FLY' || key === 'DIG') A.invuln = true;
-    say(`${A.name} ${G1_CHARGE_TEXT[key] || 'is charging up!'}`);
+    const sun = ctx.B.weather && ctx.B.weather.k === 'sun' && ctx.B.weather.turns > 0;
+    if (!(key === 'SOLARBEAM' && sun)) {
+      A.charging = key;
+      if (key === 'FLY' || key === 'DIG') A.invuln = true;
+      say(`${A.name} ${G2_CHARGE_TEXT[key] || 'is charging up!'}`);
+      return;
+    }
+  }
+
+  // Protect / Detect stop moves aimed at the Pokémon
+  if (D.protect && !mv.self && key !== 'STRUGGLE') {
+    say(`${D.name} protected itself!`);
+    if (e === 'TRAPPING_EFFECT') { A.trapping = false; A.trapLeft = 0; }
+    g2ClearVolatile(A);
     return;
   }
 
-  if (G1_FIXED_DAMAGE.has(e) || mv.p > 0 || key === 'COUNTER') return g1Attack(ctx, A, D, key, mv, o);
-  return g1StatusMove(ctx, A, D, key, mv);
+  if (mv.p > 0 || e === 'SPECIAL_DAMAGE_EFFECT' || e === 'SUPER_FANG_EFFECT' || e === 'OHKO_EFFECT' || mv.x === 'counter' || mv.x === 'mirror_coat') return g2Attack(ctx, A, D, key, mv, o);
+  return g2StatusMove(ctx, A, D, key, mv);
 }
 
-function g1Attack(ctx, A, D, key, mv, o) {
-  const say = ctx.say, rng = ctx.rng, e = mv.e;
-  let dmg = 0, crit = false, mult = 1, missed = false, immune = false, ohko = false;
+function g2Attack(ctx, A, D, key, mv, o) {
+  const say = ctx.say, rng = ctx.rng, e = mv.e, x = mv.x;
+  let dmg = 0, crit = false, mult = 1, missed = false, immune = false, ohko = false, special = G2_SPECIAL_TYPES.has(mv.t);
+  let power = mv.p;
 
+  if (x === 'snore' && A.status !== 'slp') { say('But it failed!'); return; }
   if (!o.cont) {
-    if (e === 'THRASH_PETAL_DANCE_EFFECT') { A.thrash = 2 + (g1Rb(rng) & 1); A.thrashKey = key; }
-    if (e === 'TRAPPING_EFFECT') { A.trapping = true; A.trapKey = key; A.trapLeft = 1 + g1RollMulti(rng); }
+    if (e === 'THRASH_PETAL_DANCE_EFFECT') { A.thrash = 2 + (g2Rb(rng) & 1); A.thrashKey = key; }
+    if (e === 'TRAPPING_EFFECT') { A.trapping = true; A.trapKey = key; A.trapLeft = 1 + g2RollMulti(rng); }
     if (e === 'RAGE_EFFECT') A.rage = true;
+  }
+
+  // power overrides
+  if (x === 'rollout') { A.rollN = (A.rollN || 0) + 1; power = 30 * Math.pow(2, A.rollN - 1); }
+  else if (x === 'fury_cutter') { power = Math.min(160, 10 * Math.pow(2, A.furyN)); }
+  else if (x === 'magnitude') {
+    const r = rng() * 100;
+    const t = r < 5 ? [10, 4] : r < 15 ? [30, 5] : r < 35 ? [50, 6] : r < 65 ? [70, 7] : r < 85 ? [90, 8] : r < 95 ? [110, 9] : [150, 10];
+    power = t[0]; say(`Magnitude ${t[1]}!`);
+  } else if (x === 'flail') {
+    const f = Math.floor(A.currentHp * 48 / A.maxHp);
+    power = f >= 33 ? 20 : f >= 17 ? 40 : f >= 10 ? 80 : f >= 5 ? 100 : f >= 2 ? 150 : 200;
+  } else if (x === 'present') {
+    const r = rng() * 100;
+    if (r >= 80) {
+      if (D.currentHp >= D.maxHp) say('But it failed!'); else { g2Heal(D, Math.max(1, D.maxHp >> 2)); say(`${D.name} regained health!`); }
+      return;
+    }
+    power = r < 40 ? 40 : r < 70 ? 80 : 120;
+  } else if (x === 'hidden_power') {
+    const slot = A.moves.find((m) => m.k === key);
+    if (slot) { power = slot.power; mv = { ...mv, t: slot.type }; special = G2_SPECIAL_TYPES.has(mv.t); }
+  }
+  if (key === 'SOLARBEAM' && ctx.B.weather && ctx.B.weather.k === 'rain' && ctx.B.weather.turns > 0) power = power >> 1;
+  if (x === 'future_sight') {
+    if (D.future) { say('But it failed!'); return; }
+    if (!g2HitCheck(ctx, A, D, mv)) { say(`${A.name}'s attack missed!`); return; }
+    const r = g2Damage(ctx, A, D, { ...mv, t: 'normal' }, false, { power });
+    D.future = { turns: 3, dmg: Math.max(1, Math.floor(r.dmg * (217 + Math.floor(rng() * 39)) / 255)), by: A.name };
+    say(`${A.name} foresaw an attack!`);
+    return;
   }
 
   if (e === 'SPECIAL_DAMAGE_EFFECT') {
     if (key === 'SONICBOOM') dmg = 20;
     else if (key === 'DRAGON_RAGE') dmg = 40;
-    else if (key === 'PSYWAVE') { const cap = A.level + (A.level >> 1); do { dmg = g1Rb(rng); } while (dmg === 0 || dmg >= cap); }
+    else if (key === 'PSYWAVE') { const cap = A.level + (A.level >> 1); do { dmg = g2Rb(rng); } while (dmg === 0 || dmg >= cap); }
     else dmg = A.level; // Seismic Toss, Night Shade
+    if (g2TypeMult(mv.t, D.types[0]) === 0 || (D.types[1] && g2TypeMult(mv.t, D.types[1]) === 0)) { missed = true; immune = true; }
   } else if (e === 'SUPER_FANG_EFFECT') {
     dmg = Math.max(1, D.currentHp >> 1);
   } else if (e === 'OHKO_EFFECT') {
-    if (g1Stat(A, 'spd') < g1Stat(D, 'spd')) missed = true; else { dmg = 65535; ohko = true; }
-  } else if (key === 'COUNTER') {
-    if (A.counterDmg > 0) dmg = A.counterDmg * 2; else missed = true;
+    if (A.level < D.level) missed = true;
+    else if (rng() * 100 >= 30 + A.level - D.level) missed = true;
+    else {
+      let m2 = 1; for (const dt of D.types) m2 *= g2TypeMult(mv.t, dt) / 10;
+      if (m2 === 0) { missed = true; immune = true; } else { dmg = 65535; ohko = true; }
+    }
+  } else if (x === 'counter' || x === 'mirror_coat') {
+    const want = x === 'mirror_coat';
+    if (A.hitTaken && A.hitTaken.special === want && A.hitTaken.dmg > 0) {
+      dmg = A.hitTaken.dmg * 2;
+      let m2 = 1; for (const dt of D.types) m2 *= g2TypeMult(mv.t, dt) / 10;
+      if (m2 === 0) { missed = true; immune = true; }
+    } else missed = true;
   } else {
-    crit = g1Rb(rng) < g1CritThreshold(A, key);
-    const r = g1Damage(A, D, mv, crit, e === 'EXPLODE_EFFECT');
+    const stage = g2CritStage(A, mv);
+    crit = g2Rb(rng) < G2_CRIT_RATES[stage];
+    if (mv.p === 1 && !x && key !== 'STRUGGLE') crit = false;
+    const r = g2Damage(ctx, A, D, mv, crit, { power, explode: e === 'EXPLODE_EFFECT' });
     dmg = r.dmg; mult = r.mult;
-    if (dmg === 0) { missed = true; immune = true; }
-    else if (dmg > 1) dmg = Math.floor(dmg * (217 + Math.floor(rng() * 39)) / 255);
+    if (D.invuln) {
+      if (D.charging === 'DIG' && (key === 'EARTHQUAKE' || key === 'MAGNITUDE')) dmg *= 2;
+      if (D.charging === 'FLY' && (key === 'GUST' || key === 'TWISTER')) dmg *= 2;
+    }
+    if (mult === 0) { missed = true; immune = true; dmg = 0; }
+    else {
+      if (dmg < 1) dmg = 1;
+      dmg = Math.max(1, Math.floor(dmg * (217 + Math.floor(rng() * 39)) / 255));
+    }
   }
 
-  // accuracy (Counter never misses once it has damage)
-  if (!missed && key !== 'COUNTER') {
+  // accuracy (Counter / Mirror Coat never miss once they have damage to return)
+  if (!missed && x !== 'counter' && x !== 'mirror_coat') {
     if (e === 'DREAM_EATER_EFFECT' && D.status !== 'slp') missed = true;
-    else if (e !== 'SWIFT_EFFECT') {
-      if (D.invuln) missed = true;
-      else if (!o.cont || e === 'THRASH_PETAL_DANCE_EFFECT') { if (!g1HitCheck(A, D, mv, rng)) missed = true; }
-    }
+    else if (e !== 'SWIFT_EFFECT' && e !== 'OHKO_EFFECT') {
+      const hitsInvuln = D.invuln && ((D.charging === 'DIG' && (key === 'EARTHQUAKE' || key === 'MAGNITUDE')) || (D.charging === 'FLY' && (key === 'GUST' || key === 'TWISTER')));
+      if (D.invuln && !hitsInvuln) missed = true;
+      else if (!o.cont || e === 'THRASH_PETAL_DANCE_EFFECT') { if (!g2HitCheck(ctx, A, D, mv)) missed = true; }
+    } else if (D.invuln && e !== 'OHKO_EFFECT') missed = true;
+    if (e === 'OHKO_EFFECT' && D.invuln) missed = true;
   }
 
   if (missed) {
@@ -464,6 +582,7 @@ function g1Attack(ctx, A, D, key, mv, o) {
     if (e === 'TRAPPING_EFFECT') { A.trapping = false; A.trapLeft = 0; }
     if (e === 'JUMP_KICK_EFFECT') { A.currentHp = Math.max(0, A.currentHp - 1); say(`${A.name} kept going and crashed!`); }
     if (e === 'EXPLODE_EFFECT') { A.currentHp = 0; A.status = null; A.seeded = false; }
+    A.rollN = 0; A.furyN = 0;
     return;
   }
 
@@ -472,102 +591,217 @@ function g1Attack(ctx, A, D, key, mv, o) {
   if (mult > 1) say("It's super effective!");
   else if (mult > 0 && mult < 1) say("It's not very effective...");
 
-  const hits = e === 'TWO_TO_FIVE_ATTACKS_EFFECT' ? 2 + g1RollMulti(rng)
-    : (e === 'ATTACK_TWICE_EFFECT' || e === 'TWINEEDLE_EFFECT') ? 2 : 1;
+  if (x === 'false_swipe') dmg = Math.min(dmg, Math.max(0, D.currentHp - 1));
+  if (D.status === 'frz' && mv.t === 'fire') { D.status = null; say(`Fire defrosted ${D.name}!`); }
+
+  let hits = e === 'TWO_TO_FIVE_ATTACKS_EFFECT' ? 2 + g2RollMulti(rng)
+    : (e === 'ATTACK_TWICE_EFFECT') ? 2 : x === 'triple_kick' ? 3 : 1;
   let total = 0, n = 0;
   for (let i = 0; i < hits; i++) {
+    let d1 = dmg;
+    if (x === 'triple_kick') {
+      if (i > 0 && !g2HitCheck(ctx, A, D, mv)) break;
+      const r2 = g2Damage(ctx, A, D, mv, false, { power: 10 * (i + 1) });
+      d1 = Math.max(1, Math.floor(r2.dmg * (217 + Math.floor(rng() * 39)) / 255));
+    }
     const hadSub = D.sub > 0;
-    total += g1Hurt(ctx, A, D, dmg, mv);
+    total += g2Hurt(ctx, A, D, d1, mv, special);
     n++;
-    if (D.currentHp <= 0 || (hadSub && D.sub === 0)) break;
+    if (D.currentHp <= 0 || A.currentHp <= 0 || (hadSub && D.sub === 0)) break;
   }
   if (hits > 1) say(`Hit ${n} time${n > 1 ? 's' : ''}!`);
   say(`(-${total} HP) ${D.name} ${D.currentHp}/${D.maxHp}`);
-  if (e === 'TRAPPING_EFFECT') A.trapDmg = dmg;
+  if (e === 'TRAPPING_EFFECT') A.trapDmg = Math.max(1, D.maxHp >> 4);
+
+  if (x === 'fury_cutter') A.furyN = Math.min(4, A.furyN + 1);
+  if (x === 'rollout' && A.rollN >= 5) A.rollN = 0;
 
   if (e === 'DRAIN_HP_EFFECT' || e === 'DREAM_EATER_EFFECT') {
-    g1Heal(A, Math.max(1, dmg >> 1));
+    g2Heal(A, Math.max(1, total >> 1));
     say(`Sucked health from ${D.name}!`);
   }
   if (e === 'RECOIL_EFFECT') {
-    const rec = Math.max(1, key === 'STRUGGLE' ? dmg >> 1 : dmg >> 2);
+    const rec = Math.max(1, total >> 2);
     A.currentHp = Math.max(0, A.currentHp - rec);
     say(`${A.name} is hit with recoil! (-${rec})`);
   }
   if (e === 'EXPLODE_EFFECT') { A.currentHp = 0; A.status = null; A.seeded = false; }
   if (e === 'HYPER_BEAM_EFFECT' && D.currentHp > 0) A.recharge = true;
   if (e === 'PAY_DAY_EFFECT') say('Coins scattered everywhere!');
+  if (x === 'rapid_spin') { A.seeded = false; D.trapping = false; D.trapLeft = 0; }
 
   if (D.currentHp <= 0) return;
-  g1SideEffect(ctx, A, D, key, mv);
+  g2SideEffect(ctx, A, D, key, mv);
 }
 
-function g1SideEffect(ctx, A, D, key, mv) {
-  const say = ctx.say, rng = ctx.rng, e = mv.e;
-  if (D.sub > 0) return;
-  const noStatus = () => D.status === null;
-  if (e === 'POISON_SIDE_EFFECT1' || e === 'POISON_SIDE_EFFECT2' || e === 'TWINEEDLE_EFFECT') {
-    if (!noStatus() || D.types.includes('poison')) return;
-    if (g1Rb(rng) < (e === 'POISON_SIDE_EFFECT2' ? 103 : 52)) { D.status = 'psn'; say(`${D.name} was poisoned!`); }
-  } else if (/^(BURN|FREEZE|PARALYZE)_SIDE_EFFECT[12]$/.test(e)) {
-    if (!noStatus()) {
-      if (D.status === 'frz' && mv.t === 'fire' && e.startsWith('BURN')) { D.status = null; say(`Fire defrosted ${D.name}!`); }
-      return;
+function g2SideEffect(ctx, A, D, key, mv) {
+  const say = ctx.say, rng = ctx.rng;
+  if (!mv.sec) return;
+  for (const s of mv.sec) {
+    if (s.k === 'allstats') {
+      if (A.currentHp > 0 && g2Rb(rng) < Math.floor(s.c * 256 / 100)) {
+        for (const st of ['atk', 'def', 'spd', 'spa', 'sdf']) if (A.stages[st] < 6) A.stages[st]++;
+        say(`${A.name}'s stats rose!`);
+      }
+      continue;
     }
-    if (D.types.includes(mv.t)) return;
-    if (g1Rb(rng) >= (e.endsWith('2') ? 77 : 26)) return;
-    if (e.startsWith('BURN')) { D.status = 'brn'; say(`${D.name} was burned!`); }
-    else if (e.startsWith('FREEZE')) { D.status = 'frz'; D.recharge = false; say(`${D.name} was frozen solid!`); }
-    else { D.status = 'par'; say(`${D.name} is paralyzed! It may not attack!`); }
-  } else if (e === 'FLINCH_SIDE_EFFECT1' || e === 'FLINCH_SIDE_EFFECT2') {
-    if (g1Rb(rng) < (e === 'FLINCH_SIDE_EFFECT1' ? 26 : 77)) { D.flinch = true; D.recharge = false; }
-  } else if (e === 'CONFUSION_SIDE_EFFECT') {
-    if (g1Rb(rng) < 25 && D.conf === 0) { D.conf = g1RollConfusion(rng); say(`${D.name} became confused!`); }
-  } else {
-    const m = /^(ATTACK|DEFENSE|SPEED|SPECIAL)_DOWN_SIDE_EFFECT$/.exec(e);
-    if (m && g1Rb(rng) < 85) g1StatChange(ctx, D, G1_STAT_KEYS[m[1]], -1, { silent: true });
+    if (s.self) {
+      if (A.currentHp <= 0 || g2Rb(rng) >= Math.floor(s.c * 256 / 100)) continue;
+      g2StatChange(ctx, A, s.st, s.d, {});
+      continue;
+    }
+    if (D.sub > 0 || D.currentHp <= 0) return;
+    if (g2Rb(rng) >= Math.floor(s.c * 256 / 100)) continue;
+    if (s.k === 'flinch') { D.flinch = true; D.recharge = false; }
+    else if (s.k === 'cnf') { if (D.conf === 0 && !(D.safeguard > 0)) { D.conf = g2RollConfusion(rng); say(`${D.name} became confused!`); } }
+    else if (s.k === 'stat') { if (!D.mist) g2StatChange(ctx, D, s.st, s.d, { silent: true }); }
+    else if (s.k === 'psn' || s.k === 'brn' || s.k === 'frz' || s.k === 'par') {
+      if (!g2CanStatus(D)) continue;
+      g2SetStatus(ctx, D, s.k);
+    }
   }
 }
 
-function g1StatusMove(ctx, A, D, key, mv) {
-  const say = ctx.say, rng = ctx.rng, e = mv.e;
+function g2StatusMove(ctx, A, D, key, mv) {
+  const say = ctx.say, rng = ctx.rng, e = mv.e, x = mv.x;
   const test = () => {
     if (D.invuln) return false;
-    return g1HitCheck(A, D, mv, rng);
+    return g2HitCheck(ctx, A, D, mv);
   };
   const fail = () => say('But it failed!');
 
-  let m = /^(ATTACK|DEFENSE|SPEED|SPECIAL|ACCURACY|EVASION)_(UP|DOWN)([12])_EFFECT$/.exec(e);
+  let m = /^(ATTACK|DEFENSE|SPEED|SPA|SDF|ACCURACY|EVASION)_(UP|DOWN)([12])_EFFECT$/.exec(e);
   if (m) {
-    const stat = G1_STAT_KEYS[m[1]], amt = Number(m[3]);
-    if (m[2] === 'UP') { g1StatChange(ctx, A, stat, amt, {}); return; }
-    if (D.sub > 0) { say(`${A.name}'s attack missed!`); return; }
-    if (D.mist) { say(`${A.name}'s attack missed!`); return; }
+    const stat = G2_STAT_KEYS[m[1]], amt = Number(m[3]);
+    if (m[2] === 'UP') { g2StatChange(ctx, A, stat, amt, {}); return; }
+    if (D.sub > 0 || D.mist) { say(`${A.name}'s attack missed!`); return; }
     if (!test()) { say(`${A.name}'s attack missed!`); return; }
-    g1StatChange(ctx, D, stat, -amt, {});
+    g2StatChange(ctx, D, stat, -amt, {});
     return;
+  }
+
+  // ---------- Gen 2 special status moves ----------
+  switch (x) {
+    case 'fail': fail(); return;
+    case 'protect': {
+      const chance = A.protectN === 0 ? 255 : Math.floor(255 / Math.pow(2, A.protectN));
+      if (g2Rb(rng) < chance) { A.protect = true; A.protectN++; say(`${A.name} protected itself!`); } else { A.protectN = 0; fail(); }
+      return;
+    }
+    case 'endure': {
+      const chance = A.protectN === 0 ? 255 : Math.floor(255 / Math.pow(2, A.protectN));
+      if (g2Rb(rng) < chance) { A.endure = true; A.protectN++; say(`${A.name} braced itself!`); } else { A.protectN = 0; fail(); }
+      return;
+    }
+    case 'destiny': A.destiny = true; say(`${A.name} is trying to take its foe down with it!`); return;
+    case 'lock_on': A.lockOn = true; say(`${A.name} took aim at ${D.name}!`); return;
+    case 'foresight': D.foresight = true; say(`${A.name} identified ${D.name}!`); return;
+    case 'mean_look': if (!test()) { say(`${A.name}'s attack missed!`); return; } D.noEscape = true; say(`${D.name} can no longer escape!`); return;
+    case 'perish': {
+      if (A.perish > 0 && D.perish > 0) { fail(); return; }
+      if (A.perish === 0) A.perish = 4;
+      if (D.perish === 0) D.perish = 4;
+      say('All Pokémon that heard the song will faint in 3 turns!');
+      return;
+    }
+    case 'sandstorm': if (ctx.B.weather && ctx.B.weather.k === 'sand' && ctx.B.weather.turns > 0) { fail(); return; } ctx.B.weather = { k: 'sand', turns: 5 }; say('A sandstorm brewed!'); return;
+    case 'rain': if (ctx.B.weather && ctx.B.weather.k === 'rain' && ctx.B.weather.turns > 0) { fail(); return; } ctx.B.weather = { k: 'rain', turns: 5 }; say('It started to rain!'); return;
+    case 'sun': if (ctx.B.weather && ctx.B.weather.k === 'sun' && ctx.B.weather.turns > 0) { fail(); return; } ctx.B.weather = { k: 'sun', turns: 5 }; say('The sunlight turned harsh!'); return;
+    case 'heal_weather': {
+      if (A.currentHp >= A.maxHp) { fail(); return; }
+      const w = ctx.B.weather && ctx.B.weather.turns > 0 ? ctx.B.weather.k : null;
+      const amt = w === 'sun' ? A.maxHp : w ? A.maxHp >> 2 : A.maxHp >> 1;
+      g2Heal(A, Math.max(1, amt)); say(`${A.name} regained health!`);
+      return;
+    }
+    case 'safeguard': if (A.safeguard > 0) { fail(); return; } A.safeguard = 5; say(`${A.name}'s party is protected by SAFEGUARD!`); return;
+    case 'heal_bell': A.status = null; A.badly = false; A.toxic = 0; say('A bell chimed! Status problems were cured!'); return;
+    case 'sleep_talk': {
+      if (A.status !== 'slp') { fail(); return; }
+      const pool = A.moves.filter((s) => s.k !== 'SLEEP_TALK' && GEN2.moves[s.k] && s.pp > 0);
+      if (!pool.length) { fail(); return; }
+      const pick = pool[Math.floor(rng() * pool.length)];
+      return g2Exec(ctx, A, D, pick.k, { noPP: true, noRecord: true });
+    }
+    case 'belly_drum': {
+      if (A.currentHp <= (A.maxHp >> 1) || A.stages.atk >= 6) { fail(); return; }
+      A.currentHp -= A.maxHp >> 1; A.stages.atk = 6;
+      say(`${A.name} cut its own HP and maximized its ATTACK!`);
+      return;
+    }
+    case 'swagger': {
+      if (D.sub > 0 || !test()) { say(`${A.name}'s attack missed!`); return; }
+      g2StatChange(ctx, D, 'atk', 2, {});
+      if (D.conf === 0 && !(D.safeguard > 0)) { D.conf = g2RollConfusion(rng); say(`${D.name} became confused!`); }
+      return;
+    }
+    case 'curse': {
+      if (A.types.includes('ghost')) {
+        if (D.cursed || D.sub > 0) { fail(); return; }
+        A.currentHp = Math.max(1, A.currentHp - (A.maxHp >> 1));
+        D.cursed = true; say(`${A.name} cut its own HP and laid a curse on ${D.name}!`);
+      } else {
+        g2StatChange(ctx, A, 'spd', -1, {}); g2StatChange(ctx, A, 'atk', 1, {}); g2StatChange(ctx, A, 'def', 1, {});
+      }
+      return;
+    }
+    case 'nightmare': {
+      if (D.status !== 'slp' || D.nightmare || D.sub > 0 || !test()) { fail(); return; }
+      D.nightmare = true; say(`${D.name} began having a nightmare!`);
+      return;
+    }
+    case 'spite': {
+      const last = D.lastMove && D.moves.find((s) => s.k === D.lastMove);
+      if (!last || last.pp <= 0 || !test()) { fail(); return; }
+      const cut = Math.min(last.pp, 2 + (g2Rb(rng) % 4));
+      last.pp -= cut; say(`${D.name}'s ${last.name} lost ${cut} PP!`);
+      return;
+    }
+    case 'encore': {
+      const last = D.lastMove && D.moves.find((s) => s.k === D.lastMove);
+      if (D.encore || !last || last.pp <= 0 || !test()) { fail(); return; }
+      D.encore = { key: D.lastMove, turns: 2 + (g2Rb(rng) % 5) };
+      say(`${D.name} got an ENCORE!`);
+      return;
+    }
+    case 'psych_up': A.stages = { ...D.stages }; say(`${A.name} copied ${D.name}'s stat changes!`); return;
+    case 'pain_split': {
+      if (D.sub > 0) { fail(); return; }
+      const avg = Math.floor((A.currentHp + D.currentHp) / 2);
+      A.currentHp = Math.min(A.maxHp, avg); D.currentHp = Math.min(D.maxHp, avg);
+      say('The battlers shared their pain!');
+      return;
+    }
+    case 'conversion2': {
+      const last = D.lastMove && GEN2.moves[D.lastMove];
+      if (!last) { fail(); return; }
+      const cands = Object.keys(G2_CHART).concat(['normal']).filter((t, i, arr) => arr.indexOf(t) === i && g2TypeMult(last.t, t) < 10);
+      if (!cands.length) { fail(); return; }
+      A.types = [cands[Math.floor(rng() * cands.length)]];
+      say(`${A.name} became a ${A.types[0].toUpperCase()} type!`);
+      return;
+    }
   }
 
   switch (e) {
     case 'SLEEP_EFFECT': {
       if (D.recharge) { D.recharge = false; }
       else if (D.status === 'slp') { say(`${D.name} is already asleep!`); return; }
-      else if (D.status !== null) { say("It didn't affect " + D.name + '!'); return; }
+      else if (D.status !== null || D.safeguard > 0 || D.sub > 0) { say("It didn't affect " + D.name + '!'); return; }
       else if (!test()) { say(`${A.name}'s attack missed!`); return; }
-      let n; do { n = g1Rb(rng) & 7; } while (n === 0);
-      D.status = 'slp'; D.sleep = n;
+      D.status = 'slp'; D.sleep = 1 + Math.floor(rng() * 7);
       say(`${D.name} fell asleep!`);
       return;
     }
     case 'POISON_EFFECT': {
-      if (D.sub > 0 || D.status !== null || D.types.includes('poison')) { say("It didn't affect " + D.name + '!'); return; }
+      if (!g2CanStatus(D) || D.types.includes('poison') || D.types.includes('steel')) { say("It didn't affect " + D.name + '!'); return; }
       if (!test()) { say(`${A.name}'s attack missed!`); return; }
       D.status = 'psn';
       if (key === 'TOXIC') { D.badly = true; D.toxic = 0; say(`${D.name}'s badly poisoned!`); } else say(`${D.name} was poisoned!`);
       return;
     }
     case 'PARALYZE_EFFECT': {
-      if (D.status !== null) { say("It didn't affect " + D.name + '!'); return; }
+      if (!g2CanStatus(D)) { say("It didn't affect " + D.name + '!'); return; }
       if (mv.t === 'electric' && D.types.includes('ground')) { say(`It doesn't affect ${D.name}!`); return; }
       if (!test()) { say(`${A.name}'s attack missed!`); return; }
       D.status = 'par';
@@ -575,8 +809,8 @@ function g1StatusMove(ctx, A, D, key, mv) {
       return;
     }
     case 'CONFUSION_EFFECT': {
-      if (D.sub > 0 || !test() || D.conf > 0) { fail(); return; }
-      D.conf = g1RollConfusion(rng);
+      if (D.sub > 0 || D.safeguard > 0 || !test() || D.conf > 0) { fail(); return; }
+      D.conf = g2RollConfusion(rng);
       say(`${D.name} became confused!`);
       return;
     }
@@ -584,10 +818,10 @@ function g1StatusMove(ctx, A, D, key, mv) {
       if (A.currentHp >= A.maxHp) { fail(); return; }
       if (key === 'REST') {
         A.status = 'slp'; A.sleep = 2; A.badly = false;
-        g1Heal(A, A.maxHp);
+        g2Heal(A, A.maxHp);
         say(`${A.name} started sleeping!`);
       } else {
-        g1Heal(A, A.maxHp >> 1);
+        g2Heal(A, A.maxHp >> 1);
         say(`${A.name} regained health!`);
       }
       return;
@@ -598,21 +832,18 @@ function g1StatusMove(ctx, A, D, key, mv) {
     case 'FOCUS_ENERGY_EFFECT': if (A.focus) fail(); else { A.focus = true; say(`${A.name}'s getting pumped!`); } return;
     case 'HAZE_EFFECT': {
       for (const M of [A, D]) {
-        M.stages = { atk: 0, def: 0, spd: 0, spc: 0, acc: 0, eva: 0 };
+        M.stages = G2_FRESH_STAGES();
         M.conf = 0; M.disabled = null; M.disabledTurns = 0; M.mist = false; M.focus = false; M.seeded = false;
-        M.badly = false; M.toxic = 0; M.reflect = false; M.lscreen = false;
       }
-      if (D.status === 'frz' || D.status === 'slp') ctx.skip[ctx.sideOf(D)] = true;
-      D.status = null;
-      say('All status changes were eliminated!');
+      say('All stat changes were eliminated!');
       return;
     }
     case 'CONVERSION_EFFECT': A.types = D.types.slice(); say(`Converted type to match ${D.name}'s!`); return;
     case 'TRANSFORM_EFFECT': {
       A.types = D.types.slice();
-      A.stats = { hp: A.stats.hp, atk: D.stats.atk, def: D.stats.def, spd: D.stats.spd, spc: D.stats.spc };
+      A.stats = { hp: A.stats.hp, atk: D.stats.atk, def: D.stats.def, spd: D.stats.spd, spa: D.stats.spa, sdf: D.stats.sdf };
       A.stages = { ...D.stages };
-      A.moves = D.moves.map((x) => ({ ...x, pp: 5, maxPp: 5 }));
+      A.moves = D.moves.map((s) => ({ ...s, pp: 5, maxPp: 5 }));
       A.speciesId = D.speciesId; A.spriteId = D.spriteId;
       say(`${A.name} transformed into ${D.name}!`);
       return;
@@ -620,35 +851,34 @@ function g1StatusMove(ctx, A, D, key, mv) {
     case 'SUBSTITUTE_EFFECT': {
       if (A.sub > 0) { say(`${A.name} has a SUBSTITUTE!`); return; }
       const cost = A.maxHp >> 2;
-      if (A.currentHp - cost < 0) { say('Too weak to make a SUBSTITUTE!'); return; }
+      if (A.currentHp - cost <= 0) { say('Too weak to make a SUBSTITUTE!'); return; }
       A.currentHp -= cost; A.sub = cost;
       say(`${A.name} made a SUBSTITUTE!`);
       return;
     }
     case 'LEECH_SEED_EFFECT': {
-      if (!test() || D.types.includes('grass') || D.seeded) { say(`${D.name} evaded the attack!`); return; }
+      if (!test() || D.types.includes('grass') || D.seeded || D.sub > 0) { say(`${D.name} evaded the attack!`); return; }
       D.seeded = true;
       say(`${D.name} was seeded!`);
       return;
     }
     case 'DISABLE_EFFECT': {
       if (D.disabled || !test()) { fail(); return; }
-      const cands = D.moves.filter((x) => x.pp > 0);
+      const cands = D.moves.filter((s) => s.pp > 0);
       if (cands.length === 0) { fail(); return; }
       const pick = cands[Math.floor(rng() * cands.length)];
-      D.disabled = pick.k; D.disabledTurns = 1 + (g1Rb(rng) & 7);
+      D.disabled = pick.k; D.disabledTurns = 2 + (g2Rb(rng) & 7);
       say(`${D.name}'s ${pick.name} was disabled!`);
       return;
     }
     case 'MIMIC_EFFECT': {
-      if (!test() || D.moves.length === 0) { fail(); return; }
-      const pick = D.moves[Math.floor(rng() * D.moves.length)];
-      const idx = A.moves.findIndex((x) => x.k === 'MIMIC');
-      if (idx >= 0) A.moves[idx] = { ...g1MoveEntry(pick.k), pp: 5, maxPp: pick.maxPp };
-      say(`${A.name} learned ${pick.name}!`);
+      if (!test() || !D.lastMove || !GEN2.moves[D.lastMove]) { fail(); return; }
+      const idx = A.moves.findIndex((s) => s.k === 'MIMIC');
+      if (idx >= 0) A.moves[idx] = { ...g2MoveEntry(D.lastMove, A.dvs), pp: 5, maxPp: GEN2.moves[D.lastMove].pp };
+      say(`${A.name} learned ${GEN2.moves[D.lastMove].n}!`);
       return;
     }
-    case 'BIDE_EFFECT': A.bide = { turns: 2 + (g1Rb(rng) & 1), accum: 0 }; say(`${A.name} is storing energy!`); return;
+    case 'BIDE_EFFECT': A.bide = { turns: 2 + (g2Rb(rng) & 1), accum: 0 }; say(`${A.name} is storing energy!`); return;
     case 'SPLASH_EFFECT': say('No effect!'); return;
     case 'SWITCH_AND_TELEPORT_EFFECT': fail(); return;
     default: say('But nothing happened!');
@@ -656,42 +886,53 @@ function g1StatusMove(ctx, A, D, key, mv) {
 }
 
 // ---------- one action (status gates + move) ----------
-function g1Act(ctx, A, D, sel) {
+function g2Act(ctx, A, D, sel) {
   const say = ctx.say, rng = ctx.rng;
   if (A.currentHp <= 0 || D.currentHp <= 0 || !sel) return;
+  A.destiny = false; // Destiny Bond only lasts until the user moves again
+  const mvKey = sel.key;
 
   if (A.status === 'slp') {
     A.lastMove = null; A.sleep--;
-    if (A.sleep > 0) say(`${A.name} is fast asleep.`);
-    else { A.status = null; say(`${A.name} woke up!`); }
-    return;
+    if (A.sleep > 0) {
+      say(`${A.name} is fast asleep.`);
+      if (mvKey !== 'SLEEP_TALK' && mvKey !== 'SNORE') return;
+    } else { A.status = null; A.nightmare = false; say(`${A.name} woke up!`); }
   }
-  if (A.status === 'frz') { A.lastMove = null; say(`${A.name} is frozen solid!`); return; }
-  if (D.trapping) { say(`${A.name} can't move!`); return; }
-  if (A.flinch) { A.flinch = false; say(`${A.name} flinched!`); return; }
+  if (A.status === 'frz') {
+    const mvd = GEN2.moves[mvKey];
+    if (mvd && mvd.thaw) { A.status = null; say(`${A.name} thawed out!`); }
+    else if (g2Rb(rng) < 25) { A.status = null; say(`${A.name} thawed out!`); }
+    else { A.lastMove = null; say(`${A.name} is frozen solid!`); return; }
+  }
+  if (A.flinch) { A.flinch = false; say(`${A.name} flinched!`); g2ClearVolatile(A); return; }
   if (A.recharge) { A.recharge = false; say(`${A.name} must recharge!`); return; }
   if (A.disabledTurns > 0) {
     A.disabledTurns--;
     if (A.disabledTurns === 0) { A.disabled = null; say(`${A.name} is no longer disabled!`); }
+  }
+  if (A.encore) {
+    A.encore.turns--;
+    if (A.encore.turns <= 0) { A.encore = null; say(`${A.name}'s encore ended!`); }
   }
   if (A.conf > 0) {
     A.conf--;
     if (A.conf === 0) say(`${A.name} is no longer confused!`);
     else {
       say(`${A.name} is confused!`);
-      if (g1Rb(rng) >= 128) {
-        const dmg = g1RawDamage(A.level, 40, g1Stat(A, 'atk'), g1Stat(A, 'def'));
+      if (g2Rb(rng) >= 128) {
+        const dmg = Math.max(1, Math.floor(Math.floor(Math.floor(2 * A.level / 5 + 2) * 40 * g2Stat(A, 'atk') / Math.max(1, g2Stat(A, 'def'))) / 50) + 2);
         A.currentHp = Math.max(0, A.currentHp - dmg);
         say(`It hurt itself in its confusion! (-${dmg})`);
-        g1ClearVolatile(A);
+        g2ClearVolatile(A);
         return;
       }
     }
   }
-  if (A.disabled && sel.key === A.disabled) { say(`${A.name}'s move is disabled!`); return; }
-  if (A.status === 'par' && g1Rb(rng) < 63) {
+  if (A.disabled && mvKey === A.disabled) { say(`${A.name}'s move is disabled!`); return; }
+  if (A.status === 'par' && g2Rb(rng) < 63) {
     say(`${A.name} is fully paralyzed!`);
-    g1ClearVolatile(A);
+    g2ClearVolatile(A);
     return;
   }
 
@@ -703,82 +944,135 @@ function g1Act(ctx, A, D, sel) {
     A.bide = null;
     say(`${A.name} unleashed energy!`);
     if (dmg === 0) { say(`${A.name}'s attack missed!`); return; }
-    const dealt = g1Hurt(ctx, A, D, dmg, null);
+    const dealt = g2Hurt(ctx, A, D, dmg, null, false);
     say(`(-${dealt} HP) ${D.name} ${D.currentHp}/${D.maxHp}`);
     return;
   }
-  // Thrash / Petal Dance continues
+  // Thrash / Outrage / Petal Dance continues
   if (A.thrash > 0) {
     A.thrash--;
     say(`${A.name}'s thrashing about!`);
-    if (A.thrash === 0) A.conf = g1RollConfusion(rng);
-    return g1Exec(ctx, A, D, A.thrashKey, { noPP: true, noText: true, cont: true, noRecord: true });
+    if (A.thrash === 0) A.conf = g2RollConfusion(rng);
+    return g2Exec(ctx, A, D, A.thrashKey, { noPP: true, noText: true, cont: true, noRecord: true });
   }
-  // Wrap/Bind/Fire Spin/Clamp continues
+  // Wrap/Bind/Fire Spin/Clamp/Whirlpool continues
   if (A.trapping) {
     say(`${A.name}'s attack continues!`);
     A.trapLeft--;
-    const dealt = g1Hurt(ctx, A, D, A.trapDmg, null);
+    const dealt = g2Hurt(ctx, A, D, A.trapDmg, null, false);
     say(`(-${dealt} HP) ${D.name} ${D.currentHp}/${D.maxHp}`);
     if (A.trapLeft <= 0) A.trapping = false;
     return;
   }
-  if (A.rage) return g1Exec(ctx, A, D, 'RAGE', { cont: true });
+  if (A.rage) return g2Exec(ctx, A, D, 'RAGE', { cont: true });
   if (A.charging) {
     const k = A.charging;
     A.charging = null; A.invuln = false;
-    return g1Exec(ctx, A, D, k, { charged: true });
+    return g2Exec(ctx, A, D, k, { charged: true });
   }
-  return g1Exec(ctx, A, D, sel.key, {});
+  // Rollout keeps going until it misses or hits 5 times
+  if (A.rollN > 0 && A.rollN < 5 && mvKey === 'ROLLOUT') return g2Exec(ctx, A, D, 'ROLLOUT', {});
+  return g2Exec(ctx, A, D, mvKey, {});
 }
 
-// ---------- end of action residual damage ----------
-function g1Residual(ctx, A, D) {
-  if (A.currentHp <= 0) return;
-  const base = Math.max(1, A.maxHp >> 4);
-  if (A.status === 'psn' || A.status === 'brn') {
-    let dmg = base;
-    if (A.badly && A.status === 'psn') { A.toxic++; dmg = base * A.toxic; }
-    A.currentHp = Math.max(0, A.currentHp - dmg);
-    ctx.say(`${A.name} is hurt by ${A.status === 'brn' ? 'its burn' : 'poison'}! (-${dmg})`);
+// ---------- end of round: status damage, weather, Perish Song, Future Sight ----------
+function g2EndOfRound(ctx, order) {
+  const B = ctx.B;
+  for (const side of order) {
+    const A = B[side + 'Mon'], D = B[(side === 'p1' ? 'p2' : 'p1') + 'Mon'];
+    if (A.currentHp <= 0) continue;
+    const base = Math.max(1, A.maxHp >> 3);
+    if (A.status === 'psn' || A.status === 'brn') {
+      let dmg = base;
+      if (A.badly && A.status === 'psn') { A.toxic++; dmg = Math.max(1, (A.maxHp >> 4) * A.toxic); }
+      A.currentHp = Math.max(0, A.currentHp - dmg);
+      ctx.say(`${A.name} is hurt by ${A.status === 'brn' ? 'its burn' : 'poison'}! (-${dmg})`);
+    }
+    if (A.currentHp > 0 && A.seeded) {
+      const dealt = Math.min(base, A.currentHp);
+      A.currentHp -= dealt;
+      if (D.currentHp > 0) g2Heal(D, dealt);
+      ctx.say(`LEECH SEED saps ${A.name}! (-${dealt})`);
+    }
+    if (A.currentHp > 0 && A.nightmare && A.status === 'slp') {
+      const dmg = Math.max(1, A.maxHp >> 2); A.currentHp = Math.max(0, A.currentHp - dmg);
+      ctx.say(`${A.name} is locked in a nightmare! (-${dmg})`);
+    }
+    if (A.currentHp > 0 && A.cursed) {
+      const dmg = Math.max(1, A.maxHp >> 2); A.currentHp = Math.max(0, A.currentHp - dmg);
+      ctx.say(`${A.name} is afflicted by the curse! (-${dmg})`);
+    }
   }
-  if (A.currentHp > 0 && A.seeded) {
-    const dmg = A.badly && A.toxic > 0 ? base * A.toxic : base;
-    const dealt = Math.min(dmg, A.currentHp);
-    A.currentHp -= dealt;
-    if (D.currentHp > 0) g1Heal(D, dealt);
-    ctx.say(`LEECH SEED saps ${A.name}! (-${dealt})`);
+  // weather
+  if (B.weather && B.weather.turns > 0) {
+    if (B.weather.k === 'sand') {
+      ctx.say('The sandstorm rages.');
+      for (const side of order) {
+        const A = B[side + 'Mon'];
+        if (A.currentHp > 0 && !A.invuln && !A.types.some((t) => t === 'rock' || t === 'ground' || t === 'steel')) {
+          const dmg = Math.max(1, A.maxHp >> 3); A.currentHp = Math.max(0, A.currentHp - dmg);
+          ctx.say(`${A.name} is buffeted by the sandstorm! (-${dmg})`);
+        }
+      }
+    }
+    B.weather.turns--;
+    if (B.weather.turns <= 0) {
+      ctx.say(B.weather.k === 'rain' ? 'The rain stopped.' : B.weather.k === 'sun' ? 'The sunlight faded.' : 'The sandstorm subsided.');
+      B.weather = null;
+    }
+  }
+  for (const side of order) {
+    const A = B[side + 'Mon'];
+    if (A.currentHp <= 0) continue;
+    if (A.future) {
+      A.future.turns--;
+      if (A.future.turns <= 0) {
+        const dmg = Math.min(A.future.dmg, A.currentHp);
+        A.currentHp -= dmg; ctx.say(`${A.name} took the FUTURE SIGHT attack! (-${dmg})`);
+        A.future = null;
+      }
+    }
+    if (A.currentHp > 0 && A.perish > 0) {
+      A.perish--;
+      ctx.say(`${A.name}'s perish count fell to ${A.perish}!`);
+      if (A.perish === 0) A.currentHp = 0;
+    }
+    if (A.safeguard > 0) { A.safeguard--; if (A.safeguard === 0) ctx.say(`${A.name}'s SAFEGUARD wore off!`); }
   }
 }
 
 // ---------- rounds ----------
-function g1Needs(B, side) {
-  const m = B[side + 'Mon'], o = B[(side === 'p1' ? 'p2' : 'p1') + 'Mon'];
+const G2_SLEEP_MOVES = new Set(['SLEEP_TALK', 'SNORE']);
+function g2Needs(B, side) {
+  const m = B[side + 'Mon'];
   if (m.currentHp <= 0) return false;
   if (m.charging || m.thrash > 0 || m.trapping || m.bide || m.rage || m.recharge) return false;
-  if (m.status === 'slp' || m.status === 'frz' || o.trapping) return false;
+  if (m.encore || (m.rollN > 0 && m.rollN < 5)) return false;
+  if (m.status === 'slp' && !m.moves.some((s) => G2_SLEEP_MOVES.has(s.k) && s.pp > 0)) return false;
+  if (m.status === 'frz' && !m.moves.some((s) => GEN2.moves[s.k] && GEN2.moves[s.k].thaw && s.pp > 0)) return false;
   return true;
 }
-function g1Usable(m) {
+function g2Usable(m) {
   return m.moves.map((mv, i) => ({ i, ok: mv.pp > 0 && mv.k !== m.disabled })).filter((x) => x.ok).map((x) => x.i);
 }
-function g1NeedsPick(B, side) {
-  if (!g1Needs(B, side)) return false;
-  return g1Usable(B[side + 'Mon']).length > 0; // none usable -> automatic Struggle
+function g2NeedsPick(B, side) {
+  if (!g2Needs(B, side)) return false;
+  return g2Usable(B[side + 'Mon']).length > 0; // none usable -> automatic Struggle
 }
 
-function g1StartRound(B) {
+function g2StartRound(B) {
   B.round = (B.round || 0) + 1;
   B.picks = { p1: null, p2: null };
-  B.pickState = { p1: g1NeedsPick(B, 'p1') ? 'wait' : 'auto', p2: g1NeedsPick(B, 'p2') ? 'wait' : 'auto' };
-  B.p1Mon.flinch = false; B.p2Mon.flinch = false;
-  B.p1Mon.counterDmg = 0; B.p2Mon.counterDmg = 0;
+  B.pickState = { p1: g2NeedsPick(B, 'p1') ? 'wait' : 'auto', p2: g2NeedsPick(B, 'p2') ? 'wait' : 'auto' };
+  for (const M of [B.p1Mon, B.p2Mon]) {
+    M.flinch = false; M.hitTaken = null; M.protect = false; M.endure = false;
+  }
   B.roundStartedAt = Date.now();
 }
 
-function g1Ready(B) { return B.pickState.p1 !== 'wait' && B.pickState.p2 !== 'wait'; }
+function g2Ready(B) { return B.pickState.p1 !== 'wait' && B.pickState.p2 !== 'wait'; }
 
-function g1Pick(B, side, idx) {
+function g2Pick(B, side, idx) {
   const m = B[side + 'Mon'];
   if (B.pickState[side] === 'auto') return { ok: false, msg: `${m.name} can't choose a move this turn, it acts on its own.` };
   if (B.pickState[side] === 'done') return { ok: false, msg: 'You already chose your move this round. Wait for the other trainer!' };
@@ -791,50 +1085,51 @@ function g1Pick(B, side, idx) {
   return { ok: true, move: mv };
 }
 
-function g1Selection(B, side) {
+function g2Selection(B, side) {
   const m = B[side + 'Mon'];
   if (m.bide) return { key: 'BIDE', cont: true };
   if (m.thrash > 0) return { key: m.thrashKey, cont: true };
   if (m.trapping) return { key: m.trapKey, cont: true };
   if (m.rage) return { key: 'RAGE', cont: true };
   if (m.charging) return { key: m.charging, cont: true };
+  if (m.encore) return { key: m.encore.key, cont: true };
+  if (m.rollN > 0 && m.rollN < 5) return { key: 'ROLLOUT', cont: true };
   const st = B.pickState[side];
   if (st === 'timeout') return null;
   if (st === 'done') return { key: m.moves[B.picks[side]].k };
-  // 'auto': nothing to choose (asleep, recharging, trapped...) or no PP left -> Struggle
-  const usable = g1Usable(m);
-  if (usable.length === 0 && g1Needs(B, side)) return { key: 'STRUGGLE' };
+  // 'auto': nothing to choose (asleep, recharging...) or no PP left -> Struggle
+  const usable = g2Usable(m);
+  if (usable.length === 0 && g2Needs(B, side)) return { key: 'STRUGGLE' };
   return { key: m.moves[0] ? m.moves[0].k : 'STRUGGLE', auto: true };
 }
 
-function g1Priority(sel) {
+function g2Priority(sel) {
   if (!sel) return 0;
-  if (sel.key === 'QUICK_ATTACK') return 1;
-  if (sel.key === 'COUNTER') return -1;
-  return 0;
+  const mv = GEN2.moves[sel.key];
+  return mv && mv.pri ? mv.pri : 0;
 }
 
-// Resolves one full round. Returns the battle log text; sets B.ended when someone faints.
-function g1ResolveRound(B, rng = Math.random) {
+function g2ResolveRound(B, rng = Math.random) {
   const log = [];
   const ctx = {
     B, rng, log, skip: { p1: false, p2: false },
     say: (t) => log.push(t),
     sideOf: (M) => (M === B.p1Mon ? 'p1' : 'p2')
   };
-  const sel = { p1: g1Selection(B, 'p1'), p2: g1Selection(B, 'p2') };
+  const sel = { p1: g2Selection(B, 'p1'), p2: g2Selection(B, 'p2') };
   for (const s of ['p1', 'p2']) {
-    if (B.pickState[s] === 'timeout' && !(B[s + 'Mon'].charging || B[s + 'Mon'].thrash || B[s + 'Mon'].trapping || B[s + 'Mon'].bide || B[s + 'Mon'].rage)) {
+    const M = B[s + 'Mon'];
+    if (B.pickState[s] === 'timeout' && !(M.charging || M.thrash || M.trapping || M.bide || M.rage || M.encore || M.rollN)) {
       log.push(`⏰ @${B[s]}, time has passed! No move this round.`);
     }
   }
 
   // who goes first: priority, then speed, then coin flip
   let order = ['p1', 'p2'];
-  const pr1 = g1Priority(sel.p1), pr2 = g1Priority(sel.p2);
+  const pr1 = g2Priority(sel.p1), pr2 = g2Priority(sel.p2);
   if (pr1 !== pr2) order = pr1 > pr2 ? ['p1', 'p2'] : ['p2', 'p1'];
   else {
-    const s1 = g1Stat(B.p1Mon, 'spd'), s2 = g1Stat(B.p2Mon, 'spd');
+    const s1 = g2Stat(B.p1Mon, 'spd'), s2 = g2Stat(B.p2Mon, 'spd');
     if (s1 !== s2) order = s1 > s2 ? ['p1', 'p2'] : ['p2', 'p1'];
     else if (rng() < 0.5) order = ['p2', 'p1'];
   }
@@ -843,10 +1138,10 @@ function g1ResolveRound(B, rng = Math.random) {
     const A = B[side + 'Mon'], D = B[(side === 'p1' ? 'p2' : 'p1') + 'Mon'];
     if (A.currentHp <= 0 || D.currentHp <= 0) break;
     if (ctx.skip[side]) { ctx.skip[side] = false; continue; }
-    g1Act(ctx, A, D, sel[side]);
-    g1Residual(ctx, A, D);
+    g2Act(ctx, A, D, sel[side]);
     if (A.currentHp <= 0 || D.currentHp <= 0) break;
   }
+  if (B.p1Mon.currentHp > 0 && B.p2Mon.currentHp > 0) g2EndOfRound(ctx, order);
 
   const f1 = B.p1Mon.currentHp <= 0, f2 = B.p2Mon.currentHp <= 0;
   if (f1 || f2) {
@@ -862,18 +1157,18 @@ function g1ResolveRound(B, rng = Math.random) {
 }
 
 
-// --- POKÉMON CREATION / EVOLUTION (Gen 1 data, no external API needed) ---
+// --- POKÉMON CREATION / EVOLUTION (Gen 1 + 2 data, no external API needed) ---
 async function generatePokemon(idOrName, forceShiny = null) {
-  return g1CreateMon(Number(idOrName), forceShiny);
+  return g2CreateMon(Number(idOrName), forceShiny);
 }
 
-// Pokémon saved before the Gen 1 update are rebuilt with real Gen 1 stats and moves (species, shiny status and uid are kept)
+// Pokémon saved before the Gen 2 update are rebuilt with real Gen 2 stats and moves (species, shiny status and uid are kept)
 function upgradeUser(db, name) {
   const u = db.users[name];
   if (!u || !Array.isArray(u.inventory)) return false;
   let changed = false;
   u.inventory = u.inventory.map((p) => {
-    const fixed = g1EnsureMon(p);
+    const fixed = g2EnsureMon(p);
     if (fixed !== p) changed = true;
     return fixed;
   });
@@ -900,7 +1195,7 @@ async function checkEvolution(db, user) {
     const [idStr, shinyFlag] = key.split('|');
     const speciesId = Number(idStr);
     const isShinyGroup = shinyFlag === '1';
-    const species = GEN1.mons[speciesId];
+    const species = GEN2.mons[speciesId];
     if (!species || !species.e || species.e.length === 0) continue;
 
     const nextId = species.e[Math.floor(Math.random() * species.e.length)];
@@ -913,7 +1208,7 @@ async function checkEvolution(db, user) {
       return true;
     });
 
-    const evolvedMon = g1CreateMon(nextId, isShinyGroup);
+    const evolvedMon = g2CreateMon(nextId, isShinyGroup);
     db.users[user].inventory.push(evolvedMon);
     if (!db.users[user].pokedex.includes(evolvedMon.id)) db.users[user].pokedex.push(evolvedMon.id);
     markShiny(db, user, evolvedMon);
@@ -951,7 +1246,7 @@ const BATTLE_LIMIT_MS = 5 * 60 * 1000; // max battle length (and max wait for a 
 const ACCEPT_WARN_MS = 60 * 1000;      // second warning when this much time is left to accept a challenge
 const MOVE_LIMIT_MS = 30 * 1000;       // time each player has to use !move
 const MOVE_LIMIT_SECS = MOVE_LIMIT_MS / 1000;
-const BATTLE_RULES = `📜 Gen 1 rules: each round both trainers pick !move <1-4> within ${MOVE_LIMIT_SECS}s (no pick = no attack). Faster Pokémon moves first. Battle max 5 min.`;
+const BATTLE_RULES = `📜 Gen 2 rules: each round both trainers pick !move <1-4> within ${MOVE_LIMIT_SECS}s (no pick = no attack). Faster Pokémon moves first. Battle max 5 min.`;
 
 function pickLine(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -987,11 +1282,11 @@ function roundCommentary(B, text) {
 function concludeRounds(db, key, battle) {
   const lines = [];
   let guard = 0;
-  while (!battle.ended && g1Ready(battle) && guard++ < 25) {
-    g1ResolveRound(battle);
+  while (!battle.ended && g2Ready(battle) && guard++ < 25) {
+    g2ResolveRound(battle);
     lines.push(...(battle.lastLines || []));
     battle.seq = (battle.seq || 0) + 1;
-    if (!battle.ended) g1StartRound(battle);
+    if (!battle.ended) g2StartRound(battle);
   }
   battle.roundLines = lines.slice(-14);
   const text = lines.join(' ');
@@ -1032,9 +1327,9 @@ function applyBattleTimers(db, key, battle) {
   }
 
   // Battles saved by the old engine can't continue
-  if (!battle.pickState) {
+  if (!battle.pickState || (battle.p1Mon && !battle.p1Mon.v2)) {
     delete db.activeBattles[key];
-    return `⚠️ The battle between @${battle.p1} and @${battle.p2} was canceled because the bot was updated to Gen 1 rules. Start a new one with !battle!`;
+    return `⚠️ The battle between @${battle.p1} and @${battle.p2} was canceled because the bot was updated to Gen 2 rules. Start a new one with !battle!`;
   }
 
   if (!battle.startedAt) battle.startedAt = now;
@@ -1099,7 +1394,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
   if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
   if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
-  if (upgradeUser(db, user)) await saveDB(db); // old Pokémon get real Gen 1 stats and moves
+  if (upgradeUser(db, user)) await saveDB(db); // old Pokémon get real Gen 2 stats and moves
 
   if (cmd === 'verify') {
     const code = (args[0] || '').toUpperCase();
@@ -1208,7 +1503,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const shinyTag = mon.isShiny ? '✨SHINY ' : '';
     const movesStr = mon.moves.map((m, i) => `${i + 1}:${m.name}(${m.type}/${m.power || '-'}pwr/${m.maxPp}PP)`).join(', ');
     const st = mon.stats;
-    return `@${user} #${slot + 1} ${shinyTag}${mon.name} Lv${mon.level} [${mon.types.join('/')}] | HP:${st.hp} ATK:${st.atk} DEF:${st.def} SPD:${st.spd} SPC:${st.spc} | Moves: ${movesStr}`;
+    return `@${user} #${slot + 1} ${shinyTag}${mon.name} Lv${mon.level} [${mon.types.join('/')}] | HP:${st.hp} ATK:${st.atk} DEF:${st.def} SPD:${st.spd} SPA:${st.spa} SPDEF:${st.sdf} | Moves: ${movesStr}`;
   }
 
   if (cmd === 'release') {
@@ -1328,14 +1623,14 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       if (existing.p2 === user && existing.p1 === opponent) {
         // Accepting a challenge
         const now = Date.now();
-        existing.p2Mon = g1BattleMon(g1EnsureMon(myMon));
+        existing.p2Mon = g2BattleMon(g2EnsureMon(myMon));
         existing.startedAt = now;
         existing.seq = 0;
         existing.roundLines = [];
-        g1StartRound(existing);
+        g2StartRound(existing);
         existing.lastLog = `Round 1: choose your moves!`;
         await saveDB(db);
-        return `🔥 Battle started! ${existing.p1Mon.name} (@${existing.p1}) vs ${existing.p2Mon.name} (@${existing.p2}), both Lv${G1_LEVEL}! ${BATTLE_RULES} Round 1: both trainers use !move <1-4> now!`;
+        return `🔥 Battle started! ${existing.p1Mon.name} (@${existing.p1}) vs ${existing.p2Mon.name} (@${existing.p2}), both Lv${G2_LEVEL}! ${BATTLE_RULES} Round 1: both trainers use !move <1-4> now!`;
       }
       if (existing.p1 === user) return `@${user} You already challenged @${existing.p2}! Wait for them to accept, or use !forfeit to cancel your challenge.`;
       return `@${user} @${existing.p1} already challenged you! Accept with !battle @${existing.p1} <slot>.`;
@@ -1346,7 +1641,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     db.activeBattles[battleKey] = {
       p1: user,
       p2: opponent,
-      p1Mon: g1BattleMon(g1EnsureMon(myMon)),
+      p1Mon: g2BattleMon(g2EnsureMon(myMon)),
       p2Mon: null,
       lastLog: `@${user} challenged @${opponent}!`,
       createdAt: Date.now(),
@@ -1386,10 +1681,10 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       return `@${user} ${prefix} Your ${mon.name}'s moves: ${movesList}. Both trainers pick each round, you have ${MOVE_LIMIT_SECS}s!`;
     }
 
-    const picked = g1Pick(battle, side, moveIdx);
+    const picked = g2Pick(battle, side, moveIdx);
     if (!picked.ok) return `@${user} ${picked.msg}`;
 
-    if (!g1Ready(battle)) {
+    if (!g2Ready(battle)) {
       await saveDB(db);
       const secsLeft = Math.max(1, Math.ceil((battle.roundStartedAt + MOVE_LIMIT_MS - Date.now()) / 1000));
       return `✅ @${user} locked in a move! Waiting for @${opponentUser} (${secsLeft}s left)...`;
@@ -2072,8 +2367,8 @@ setInterval(async () => {
 // API:     /api/pokedex        -> public JSON (no secrets, no internal uids)
 //          /api/login/start, /api/login/status, /api/me, /api/logout, /api/release
 
-function registerPokedexSite(app, { getDB, saveDB, GEN1, MAX_POKEMON_ID, webLogins, crypto }) {
-  const species = Object.entries(GEN1.mons)
+function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
+  const species = Object.entries(GEN2.mons)
     .map(([id, m]) => ({ id: Number(id), name: m.n, types: m.t }))
     .sort((a, b) => a.id - b.id);
 
@@ -2643,13 +2938,13 @@ const PAGE = `<!DOCTYPE html>
       what: 'Shows every Pokémon you own with its slot number (max 15). The slot numbers are used by !info, !release, !trade and !battle. Shiny Pokémon have a star. You can also manage your party on this website.',
       use: '!party  (or !party <page> if you have more than 15)', ex: '!party' },
     { n: '!info', s: 'Stats and moves of one Pokémon',
-      what: 'Shows the level, type, stats (HP, ATK, DEF, SPD, SPC) and the 4 moves of the Pokémon in a slot, including move type, power and PP.',
+      what: 'Shows the level, type, stats (HP, ATK, DEF, SPD, SP. ATK, SP. DEF) and the 4 moves of the Pokémon in a slot, including move type, power and PP.',
       use: '!info <slot number>', ex: '!info 1' },
     { n: '!release', s: 'Release a Pokémon from your party',
       what: 'Permanently removes the Pokémon in that slot from your party to free space. It cannot be undone, but the species stays in your Pokédex. You can also release Pokémon on this website by pressing them.',
       use: '!release <slot number>', ex: '!release 3' },
     { n: '!pokedex', s: 'Your Pokédex progress',
-      what: 'Shows how many different species you have found out of 151, the percentage, and your total number of catches.',
+      what: 'Shows how many different species you have found out of 251 (Gen 1 and Gen 2), the percentage, and your total number of catches.',
       use: '!pokedex', ex: '!pokedex' },
     { n: '!leaderboard', s: 'Top catchers and battle winners in chat',
       what: 'Shows the top 3 trainers by catches and by battle wins. Add catches or wins to see only one of them. The full Top 10 lists are on this website.',
@@ -2661,7 +2956,7 @@ const PAGE = `<!DOCTYPE html>
       what: 'Accepts a trade someone offered you. You choose which of your Pokémon to give in exchange. Both trainers swap Pokémon right away and a trade can trigger evolutions.',
       use: '!accept <your slot>', ex: '!accept 1' },
     { n: '!battle', s: 'Challenge a trainer or accept a challenge',
-      what: 'Challenges another trainer with the Pokémon in your slot, or accepts a challenge you received. The other trainer has 5 minutes to accept. Battles use Pokémon Red and Blue rules at level 50 and last 5 minutes at most. When time runs out the Pokémon with more HP left wins.',
+      what: 'Challenges another trainer with the Pokémon in your slot, or accepts a challenge you received. The other trainer has 5 minutes to accept. Battles use Gen 2 (Gold, Silver and Crystal) rules at level 50 and last 5 minutes at most. When time runs out the Pokémon with more HP left wins.',
       use: '!battle @username <your slot>', ex: '!battle @ash 1' },
     { n: '!move', s: 'Pick your attack in a battle',
       what: 'Every round both trainers choose a move within 30 seconds. If you do not choose, your Pokémon does not attack that round. The faster Pokémon moves first. Use it without a number to see your moves and their PP.',
@@ -2887,7 +3182,7 @@ const PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-registerPokedexSite(app, { getDB, saveDB, GEN1, MAX_POKEMON_ID, webLogins, crypto });
+registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogins, crypto });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
