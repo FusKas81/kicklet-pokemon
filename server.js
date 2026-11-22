@@ -59,7 +59,7 @@ function spawnExpiresAt(spawn) {
 }
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
-const SITE_NOTE = `🌐 Manage your Pokemon on the site: ${POKEDEX_SITE}`;
+const SITE_NOTE = `🌐 Manage your Pokemon here ➡️ ${POKEDEX_SITE}`;
 
 // Store temporary PKCE verifier in memory during login
 let tempPkceVerifier = null;
