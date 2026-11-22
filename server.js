@@ -59,6 +59,7 @@ function spawnExpiresAt(spawn) {
 }
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
+const SITE_NOTE = `🌐 Manage your Pokemon on the site: ${POKEDEX_SITE}`;
 
 // Store temporary PKCE verifier in memory during login
 let tempPkceVerifier = null;
@@ -1163,7 +1164,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY})`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
-    reply += ` | 🌐 View your Pokédex & shinies, see the Top 10 and release Pokémon on the site: ${POKEDEX_SITE}`;
+    reply += ` | ${SITE_NOTE}`;
     return reply;
   }
 
@@ -1183,7 +1184,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'party') {
     const inv = db.users[user].inventory;
     const tip = '💡 Have 3 of the same Pokémon and they evolve (if they have an evolution)!';
-    const siteNote = args.length === 0 ? ` | 🌐 You can also manage your !party and !release on the site: ${POKEDEX_SITE}` : '';
+    const siteNote = args.length === 0 ? ` | ${SITE_NOTE}` : '';
     if (inv.length === 0) return `@${user} Your party is empty! Use !catch when a wild Pokémon appears. ${tip}${siteNote}`;
     const PER_PAGE = 15;
     const pages = Math.ceil(inv.length / PER_PAGE);
@@ -1212,7 +1213,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'release') {
     const inv = db.users[user].inventory;
-    const siteNote = args.length === 0 ? ` | 🌐 You can also manage your !party and !release on the site: ${POKEDEX_SITE}` : '';
+    const siteNote = args.length === 0 ? ` | ${SITE_NOTE}` : '';
     if (inv.length === 0) return `@${user} Your party is empty, nothing to release!${siteNote}`;
     const slot = parseInt(args[0]) - 1;
     if (args.length === 0 || Number.isNaN(slot)) {
@@ -1228,7 +1229,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const uniqueCount = db.users[user].pokedex.length;
     const totalCaught = db.users[user].totalCaught;
     const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
-    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | 🌐 Watch all your captured Pokémon here: https://kicklet-pokemon.onrender.com/pokedex`;
+    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | ${SITE_NOTE}`;
   }
 
   if (cmd === 'leaderboard') {
@@ -1412,7 +1413,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
-    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help | 🌐 Site: ${POKEDEX_SITE} (Top 10 catchers, every trainer's Pokédex & shinies, release Pokémon from your party)`;
+    return `🎮 Commands: !catch (catch the wild Pokémon) | !spawncheck (see the current spawn) | !party (your Pokémon) | !info <slot> (stats & moves) | !release <slot> | !pokedex | !leaderboard (top catchers & battle winners) | !trade @user <slot> | !accept <slot> | !battle @user <slot> (challenge) | !move <1-4> (battle) | !forfeit | !help | ${SITE_NOTE}`;
   }
 
   return null;
