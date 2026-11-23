@@ -2851,7 +2851,7 @@ const PAGE = `<!DOCTYPE html>
   #play .pl-box { background:var(--panel); border:4px solid var(--line); border-radius:10px; padding:14px; font-size:9px; line-height:1.8; }
   #play .pl-t { color:var(--gold); font-size:11px; margin-bottom:8px; }
   #play label { display:block; color:var(--mute); font-size:8px; margin:8px 0 4px; }
-  #play select { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
+  #play select, #play input { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
   #play .pl-box .btn { margin-top:10px; width:100%; }
   #play .pl-note { background:var(--panel2); border:3px solid var(--gold); border-radius:10px; padding:12px 14px; font-size:9px; line-height:1.9; margin-bottom:10px; }
   #play .pl-note b { color:var(--gold); }
@@ -3437,18 +3437,18 @@ const PAGE = `<!DOCTYPE html>
       if (!s.party.length) {
         $('play-forms').innerHTML = '<div class="pl-note">Catch a Pokémon in chat first, then you can battle and trade here.</div>';
       } else {
-        var who = '<option value="">choose a trainer...</option>' + s.trainers.map(function (n) { return '<option value="' + esc(n) + '">@' + esc(n) + '</option>'; }).join('');
+        var who = s.trainers.map(function (n) { return '<option value="' + esc(n) + '"></option>'; }).join('');
         var mons = partyOptions(s.party);
         $('play-forms').innerHTML = '<div class="pl-grid">' +
           '<div class="pl-box"><div class="pl-t">⚔️ CHALLENGE TO A BATTLE</div>' +
-            '<label>1. WHO DO YOU WANT TO FIGHT?</label><select id="pb-who">' + who + '</select>' +
+            '<label>1. WHO DO YOU WANT TO FIGHT? (TYPE TO SEARCH)</label><input id="pb-who" list="pl-trainers" placeholder="search trainer..." autocomplete="off">' +
             '<label>2. WHICH POKÉMON FIGHTS FOR YOU?</label><select id="pb-mon">' + mons + '</select>' +
             '<button class="btn yes" data-act="battle-go">CHALLENGE</button></div>' +
           '<div class="pl-box"><div class="pl-t">🔄 OFFER A TRADE</div>' +
-            '<label>1. WHO DO YOU WANT TO TRADE WITH?</label><select id="pt-who">' + who + '</select>' +
+            '<label>1. WHO DO YOU WANT TO TRADE WITH? (TYPE TO SEARCH)</label><input id="pt-who" list="pl-trainers" placeholder="search trainer..." autocomplete="off">' +
             '<label>2. WHICH POKÉMON DO YOU GIVE?</label><select id="pt-mon">' + mons + '</select>' +
             '<button class="btn yes" data-act="trade-go">OFFER TRADE</button></div>' +
-          '</div>';
+          '</div><datalist id="pl-trainers">' + who + '</datalist>';
       }
     }
 
@@ -3521,12 +3521,18 @@ const PAGE = `<!DOCTYPE html>
     if (!el || el.disabled) return;
     var act = el.getAttribute('data-act');
     var val = function (id) { var x = $(id); return x ? x.value : ''; };
+    var trainer = function (id) {
+      var v = val(id).trim().toLowerCase().split('@').join('');
+      return playState && playState.trainers.indexOf(v) !== -1 ? v : '';
+    };
     if (act === 'battle-go') {
-      if (!val('pb-who')) { toast('Pick a trainer to fight first.'); return; }
-      playAct({ action: 'battle', opponent: val('pb-who'), slot: val('pb-mon') }, el);
+      var o = trainer('pb-who');
+      if (!o) { toast('Type a trainer name and pick it from the list.'); return; }
+      playAct({ action: 'battle', opponent: o, slot: val('pb-mon') }, el);
     } else if (act === 'trade-go') {
-      if (!val('pt-who')) { toast('Pick a trainer to trade with first.'); return; }
-      playAct({ action: 'trade', target: val('pt-who'), slot: val('pt-mon') }, el);
+      var t = trainer('pt-who');
+      if (!t) { toast('Type a trainer name and pick it from the list.'); return; }
+      playAct({ action: 'trade', target: t, slot: val('pt-mon') }, el);
     } else if (act === 'accept-battle') {
       playAct({ action: 'battle', opponent: playState.battle.opponent, slot: val('pa-mon') }, el);
     } else if (act === 'accept-trade') {
