@@ -1452,7 +1452,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (Date.now() > spawnExpiresAt(spawn)) {
       return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}!`;
     }
-    if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}!`;
+    if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}! [emote:5756614:CaptFail]`;
     if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (${MAX_INVENTORY}/${MAX_INVENTORY})! Use !release <1-${MAX_INVENTORY}>.`;
 
     // Each trainer gets MAX_CATCH_TRIES attempts per spawn
