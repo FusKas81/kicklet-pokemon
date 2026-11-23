@@ -1492,10 +1492,10 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     await saveDB(db);
 
     const shinyTag = caughtMon.isShiny ? '✨SHINY ' : '';
-    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY})`;
+    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY}) [emote:37232:PeepoClap]`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
-    reply += ` | ${SITE_NOTE} [emote:37232:PeepoClap]`;
+    reply += ` | ${SITE_NOTE}`;
     return reply;
   }
 
