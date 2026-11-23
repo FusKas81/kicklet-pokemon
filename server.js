@@ -58,7 +58,7 @@ function lockDB() {
 
 const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
-const MAX_INVENTORY = 30;
+const MAX_INVENTORY = 50;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
@@ -2978,7 +2978,7 @@ const PAGE = `<!DOCTYPE html>
   // ---------- chat commands list ----------
   var COMMANDS = [
     { n: '!catch', s: 'Throw a Pokéball at the wild Pokémon',
-      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 60 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (30). Catching 3 of the same species merges them into its evolution.',
+      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 60 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
       use: '!catch', ex: '!catch' },
     { n: '!spawncheck / !wild', s: 'See the wild Pokémon right now',
       what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
@@ -2987,7 +2987,7 @@ const PAGE = `<!DOCTYPE html>
       what: 'Spawns a random Pokémon right away. Only the channel owner, moderators and subscribers can use it, only when no Pokémon is catchable, and each user has a 10 minute cooldown.',
       use: '!spawn', ex: '!spawn' },
     { n: '!party', s: 'List your Pokémon and slot numbers',
-      what: 'Shows every Pokémon you own with its slot number (max 30). The slot numbers are used by !info, !release, !trade and !battle. Shiny Pokémon have a star. You can also manage your party on this website.',
+      what: 'Shows every Pokémon you own with its slot number (max 50). The slot numbers are used by !info, !release, !trade and !battle. Shiny Pokémon have a star. You can also manage your party on this website.',
       use: '!party  (or !party <page> if you have more than 15 Pokémon, 15 are shown per page)', ex: '!party' },
     { n: '!info', s: 'Stats and moves of one Pokémon',
       what: 'Shows the level, type, stats (HP, ATK, DEF, SPD, SP. ATK, SP. DEF) and the 4 moves of the Pokémon in a slot, including move type, power and PP.',
