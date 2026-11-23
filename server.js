@@ -1324,7 +1324,7 @@ function concludeRounds(db, key, battle) {
     battle.lastLog = finalMsg;
     recordBattleEnd(db, battle, winner, 'faint', finalMsg);
     delete db.activeBattles[key];
-    return `💥 ${trimChat(text, 330)} 🏆 @${winner} wins! 🎙️ ${pickLine(["And that's the match! What a finish!", `${loserMon.name} gave it everything, but it's over!`, 'Incredible battle, chat!'])} [emote:5273241:MOGGED]`;
+    return `💥 ${trimChat(text, 330)} 🏆 @${winner} [emote:5756671:GIGACHAD] wins! @${battle[battle.ended.winner === 'p1' ? 'p2' : 'p1']} [emote:1730802:emojiOuch] 🎙️ ${pickLine(["And that's the match! What a finish!", `${loserMon.name} gave it everything, but it's over!`, 'Incredible battle, chat!'])}`;
   }
 
   const waiting = ['p1', 'p2'].filter(s => battle.pickState[s] === 'wait').map(s => '@' + battle[s]);
@@ -1373,7 +1373,7 @@ function applyBattleTimers(db, key, battle) {
     }
     const winner = p1Pct > p2Pct ? battle.p1 : battle.p2;
     recordBattleEnd(db, battle, winner, 'time', `Time is up! @${winner} wins on remaining HP!`);
-    return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} wins on remaining HP! [emote:5273241:MOGGED]`;
+    return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} [emote:5756671:GIGACHAD] wins on remaining HP! @${winner === battle.p1 ? battle.p2 : battle.p1} [emote:1730802:emojiOuch]`;
   }
 
   // Move limit: whoever didn't pick loses their action this round, the other trainer's Pokémon still attacks
@@ -1673,6 +1673,14 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       if (existing.p1 === user) return `@${user} You already challenged @${existing.p2}! Wait for them to accept, or use !forfeit to cancel your challenge.`;
       return `@${user} @${existing.p1} already challenged you! Accept with !battle @${existing.p1} <slot>.`;
     }
+    // Only one battle at a time for the whole channel: a new challenge is allowed only after the current battle is over
+    const runningKey = Object.keys(db.activeBattles || {}).find(k => db.activeBattles[k]);
+    if (runningKey) {
+      const rb = db.activeBattles[runningKey];
+      return rb.p2Mon
+        ? `@${user} Only one battle can happen at a time! @${rb.p1} vs @${rb.p2} is going on right now. You can challenge someone when it finishes. [emote:4148081:Sadge]`
+        : `@${user} Only one battle can happen at a time! @${rb.p1} already challenged @${rb.p2}. You can challenge someone once that battle is over or the challenge is canceled. [emote:4148081:Sadge]`;
+    }
     if (findBattleKey(db, opponent)) return `@${user} @${opponent} is already busy with another battle or challenge. Try again later!`;
 
     const battleKey = [user, opponent].sort().join('_vs_');
@@ -1742,7 +1750,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (wasAccepted) recordBattleEnd(db, battle, opponent, 'forfeit', `@${user} forfeited! @${opponent} wins!`);
     delete db.activeBattles[battleKey];
     await saveDB(db);
-    return wasAccepted ? `🏳️ @${user} forfeited! 🏆 @${opponent} wins! [emote:5273241:MOGGED]` : `🏳️ @${user} canceled the challenge.`;
+    return wasAccepted ? `🏳️ @${user} [emote:1730802:emojiOuch] forfeited! 🏆 @${opponent} [emote:5756671:GIGACHAD] wins!` : `🏳️ @${user} canceled the challenge.`;
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
