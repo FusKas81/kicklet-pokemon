@@ -62,7 +62,7 @@ const MAX_INVENTORY = 50;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
-const CATCH_WINDOW_MS = 90 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
+const CATCH_WINDOW_MS = 120 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
@@ -1584,7 +1584,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'trade') {
     if (args.length === 0) {
-      return `@${user} To trade, type !trade @username <slot>, e.g. !trade @ash 2 offers your slot 2 Pokémon to @ash. They accept with !accept <their slot> and you swap Pokémon. Type !party to see your slots.`;
+      return `@${user} To trade, type !trade @username <slot>, e.g. !trade @ash 2 offers your slot 2 Pokémon to @ash. They accept with !accept <their slot> and you swap Pokémon. Type !party to see your slots. You can do it here ➡️ ${POKEDEX_SITE}`;
     }
     const target = (args[0] || '').toLowerCase().replace('@', '');
     const slot = parseInt(args[1]) - 1;
@@ -1647,7 +1647,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const slot = parseInt(args[1]) - 1;
     const myMon = db.users[user].inventory[slot];
     if (args.length === 0) {
-      return `@${user} To battle another trainer, type !battle @username <slot>, e.g. !battle @ash 1 challenges @ash with the Pokémon in your slot 1. They have 5 minutes to accept with !battle @${user} <slot>. Each round both pick !move <1-4>. Use !forfeit to quit.`;
+      return `@${user} To battle another trainer, type !battle @username <slot>, e.g. !battle @ash 1 challenges @ash with the Pokémon in your slot 1. They have 5 minutes to accept with !battle @${user} <slot>. Each round both pick !move <1-4>. Use !forfeit to quit. You can do it here ➡️ ${POKEDEX_SITE}`;
     }
     if (!opponent || !db.users[opponent]) return `@${user} Opponent not found. Use !battle @username <slot>, e.g. !battle @ash 1.`;
     if (opponent === user) return `@${user} You can't battle yourself!`;
@@ -2273,7 +2273,7 @@ app.get('/overlay', (req, res) => {
       var txt = $('spawn-timer');
       var bar = $('spawn-bar');
       if (!lastSpawn) return;
-      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 90000);
+      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 120000);
       var total = Math.max(1, expires - lastSpawn.spawnedAt);
       var left = Math.max(0, expires - serverNow());
       var secs = Math.ceil(left / 1000);
@@ -2346,7 +2346,7 @@ app.get('/overlay', (req, res) => {
 
         // spawned Pokémon (centre of the screen)
         var s = data.spawn;
-        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 90000))) {
+        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 120000))) {
           lastSpawn = s;
           card.style.display = 'block';
           var banner = $('spawn-banner');
@@ -2399,8 +2399,29 @@ setInterval(async () => {
       if (expiredAgo < 60000) { // skip stale spawns left over from before a restart
         const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
         const catchers = spawn.caughtBy || [];
+        // List catchers only while the whole message still fits in the 500 character chat limit; the rest are left out
+        const fledHead = `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: `;
+        const fledTail = ` [emote:37232:PeepoClap]. Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`;
+        const MORE = ' ...and more';
+        const fitCatchers = (reserve) => {
+          const out = [];
+          let len = 0;
+          for (const u of catchers) {
+            const piece = (out.length ? ', ' : '') + '@' + u;
+            if (fledHead.length + len + piece.length + reserve + fledTail.length > 500) break;
+            out.push('@' + u);
+            len += piece.length;
+          }
+          return out;
+        };
+        let shownCatchers = fitCatchers(0);
+        let fledNames = shownCatchers.join(', ');
+        if (shownCatchers.length < catchers.length) {
+          shownCatchers = fitCatchers(MORE.length);
+          fledNames = shownCatchers.join(', ') + MORE;
+        }
         messages.push(catchers.length > 0
-          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')} [emote:37232:PeepoClap]. Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`
+          ? fledHead + fledNames + fledTail
           : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! [emote:5756621:kkHuh] Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`);
       } else {
         messages.push(null);
@@ -3163,7 +3184,7 @@ const PAGE = `<!DOCTYPE html>
   // ---------- chat commands list ----------
   var COMMANDS = [
     { n: '!catch', s: 'Throw a Pokéball at the wild Pokémon',
-      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 90 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
+      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 120 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
       use: '!catch', ex: '!catch' },
     { n: '!spawncheck / !wild', s: 'See the wild Pokémon right now',
       what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
