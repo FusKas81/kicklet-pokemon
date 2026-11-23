@@ -1463,7 +1463,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
     if (Date.now() > spawnExpiresAt(spawn)) {
-      return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}!`;
+      return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`;
     }
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}! [emote:5756614:CaptFail]`;
     if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (${MAX_INVENTORY}/${MAX_INVENTORY})! Use !release <1-${MAX_INVENTORY}>.`;
@@ -1478,7 +1478,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       await saveDB(db);
       const left = MAX_CATCH_TRIES - spawn.attempts[user];
       return left > 0
-        ? `@${user} The wild ${spawn.name} broke free! You have ${left} ${left === 1 ? 'try' : 'tries'} left (${spawn.attempts[user]}/${MAX_CATCH_TRIES} used).`
+        ? `@${user} The wild ${spawn.name} broke free! You have ${left} ${left === 1 ? 'try' : 'tries'} left (${spawn.attempts[user]}/${MAX_CATCH_TRIES} used).${left === 1 ? ' [emote:5273247:highCortisol]' : ''}`
         : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn. [emote:4148128:mericCat]`;
     }
 
@@ -1501,15 +1501,15 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'spawncheck' || cmd === 'wild') {
     const spawn = db.activeSpawn;
-    if (!spawn) return `@${user} No wild Pokémon right now!`;
-    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now! Next spawn in ${nextSpawnText(db, spawn)}!`;
+    if (!spawn) return `@${user} No wild Pokémon right now! [emote:5756621:kkHuh]`;
+    if (Date.now() > spawnExpiresAt(spawn)) return `@${user} No wild Pokémon right now! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5756621:kkHuh]`;
     const secsLeft = Math.max(1, Math.ceil((spawnExpiresAt(spawn) - Date.now()) / 1000));
     const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
     const triesLeft = MAX_CATCH_TRIES - ((spawn.attempts && spawn.attempts[user]) || 0);
     const status = spawn.caughtBy.includes(user)
       ? 'Already caught!'
       : (triesLeft <= 0 ? 'No tries left!' : `Type !catch to throw a Pokéball! (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left, ${secsLeft}s remaining)`);
-    return `🌿 Active Spawn: ${shinyTag}${spawn.name} (${spawn.types.join('/').toUpperCase()}) — ${status}`;
+    return `🌿 Active Spawn: ${shinyTag}${spawn.name} (${spawn.types.join('/').toUpperCase()}) — ${status} [emote:5756621:kkHuh]`;
   }
 
   if (cmd === 'party') {
@@ -2392,8 +2392,8 @@ setInterval(async () => {
         const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
         const catchers = spawn.caughtBy || [];
         messages.push(catchers.length > 0
-          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(db, spawn)}!`
-          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(db, spawn)}!`);
+          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`
+          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`);
       } else {
         messages.push(null);
       }
