@@ -2712,8 +2712,9 @@ const PAGE = `<!DOCTYPE html>
 
   /* party strip (individual Pokémon you can release) */
   .party { display:flex; flex-wrap:wrap; gap:4px; padding:6px; background:#0f101a; border-radius:8px; margin-bottom:10px; min-height:52px; }
-  .pm { width:46px; height:46px; background:var(--panel2); border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:transform .12s, box-shadow .12s; }
+  .pm { position:relative; width:46px; height:46px; background:var(--panel2); border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:transform .12s, box-shadow .12s; }
   .pm img { width:100%; height:100%; image-rendering:pixelated; object-fit:contain; pointer-events:none; }
+  .pm .sn { position:absolute; left:2px; bottom:1px; font-size:7px; line-height:1; color:var(--ink); background:rgba(11,12,18,.75); padding:2px 3px; border-radius:3px; pointer-events:none; }
   .pm.sh { outline:2px solid var(--gold); background:#2a220a; }
   .pm:hover { transform:translateY(-4px) scale(1.12); box-shadow:0 6px 14px rgba(0,0,0,.6); }
   .pm.mine { outline:2px dashed #fca5a5; }
@@ -2922,7 +2923,9 @@ const PAGE = `<!DOCTYPE html>
     var name = pretty(el.getAttribute('data-name'));
     var owner = el.getAttribute('data-user');
     var head = '<b>' + esc(name) + '</b> Lv' + esc(el.getAttribute('data-level')) + (el.getAttribute('data-shiny') === '1' ? ' ✨' : '') + ' (@' + esc(owner) + ')';
-    var p = partyOf(owner, Number(el.getAttribute('data-slot')));
+    var slotNo = Number(el.getAttribute('data-slot'));
+    var p = partyOf(owner, slotNo);
+    if (!isNaN(slotNo)) head += '<br>Slot ' + (slotNo + 1);
     var mv = '';
     if (p && p.moves && p.moves.length) {
       mv = '<br><br><em>MOVES</em>' + p.moves.map(function (m, i) {
@@ -3190,7 +3193,7 @@ const PAGE = `<!DOCTYPE html>
         ? u.party.map(function (p) {
             return '<div class="pm' + (p.shiny ? ' sh' : '') + (me && me === u.name ? ' mine' : '') + '"' +
               ' data-user="' + esc(u.name) + '" data-slot="' + p.slot + '" data-id="' + p.id + '" data-shiny="' + (p.shiny ? 1 : 0) + '"' +
-              ' data-name="' + esc(p.name) + '" data-level="' + p.level + '"><img loading="lazy" src="' + png(p.id, p.shiny) + '" alt=""></div>';
+              ' data-name="' + esc(p.name) + '" data-level="' + p.level + '"><img loading="lazy" src="' + png(p.id, p.shiny) + '" alt=""><span class="sn">' + (p.slot + 1) + '</span></div>';
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
