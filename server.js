@@ -59,14 +59,6 @@ function spawnExpiresAt(spawn) {
 }
 const REDIRECT_URI = 'https://kicklet-pokemon.onrender.com/kick-callback';
 const POKEDEX_SITE = 'https://kicklet-pokemon.onrender.com/pokedex';
-// Kick facepalm emote shown when a trainer misses every Pokéball. Kick emote ID 4148128 (mericCat).
-// Kick emote added at the end of every successful catch
-const CATCH_EMOTE = process.env.CATCH_EMOTE || '[emote:37232:PeepoClap]';
-// Kick emote added at the end of every spawn announcement
-const SPAWN_EMOTE = process.env.SPAWN_EMOTE || '[emote:5756381:modCheck]';
-// Kick emote added at the end of every battle-win message
-const MOGGED_EMOTE = process.env.MOGGED_EMOTE || '[emote:5273241:MOGGED]';
-const FACEPALM_EMOTE = process.env.FACEPALM_EMOTE || '[emote:4148128:mericCat]';
 const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 
 // Store temporary PKCE verifier in memory during login
@@ -1306,7 +1298,7 @@ function concludeRounds(db, key, battle) {
     battle.lastLog = finalMsg;
     recordBattleEnd(db, battle, winner, 'faint', finalMsg);
     delete db.activeBattles[key];
-    return `💥 ${trimChat(text, 330)} 🏆 @${winner} wins! 🎙️ ${pickLine(["And that's the match! What a finish!", `${loserMon.name} gave it everything, but it's over!`, 'Incredible battle, chat!'])} ${MOGGED_EMOTE}`;
+    return `💥 ${trimChat(text, 330)} 🏆 @${winner} wins! 🎙️ ${pickLine(["And that's the match! What a finish!", `${loserMon.name} gave it everything, but it's over!`, 'Incredible battle, chat!'])} [emote:5273241:MOGGED]`;
   }
 
   const waiting = ['p1', 'p2'].filter(s => battle.pickState[s] === 'wait').map(s => '@' + battle[s]);
@@ -1355,7 +1347,7 @@ function applyBattleTimers(db, key, battle) {
     }
     const winner = p1Pct > p2Pct ? battle.p1 : battle.p2;
     recordBattleEnd(db, battle, winner, 'time', `Time is up! @${winner} wins on remaining HP!`);
-    return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} wins on remaining HP! ${MOGGED_EMOTE}`;
+    return `⏰ Time's up! The 5 minute limit is over (${p1Txt} vs ${p2Txt}). 🏆 @${winner} wins on remaining HP! [emote:5273241:MOGGED]`;
   }
 
   // Move limit: whoever didn't pick loses their action this round, the other trainer's Pokémon still attacks
@@ -1378,7 +1370,7 @@ async function triggerSpawn(db) {
   await saveDB(db);
 
   const shinyTag = mon.isShiny ? '✨SHINY ' : '';
-  return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch within ${CATCH_WINDOW_MS / 1000} seconds to throw a Pokéball! (${MAX_CATCH_TRIES} tries each) ${SPAWN_EMOTE}`;
+  return `🌿 A wild ${shinyTag}${mon.name} (${mon.types.join('/').toUpperCase()}) appeared! Type !catch within ${CATCH_WINDOW_MS / 1000} seconds to throw a Pokéball! (${MAX_CATCH_TRIES} tries each) [emote:5756381:modCheck]`;
 }
 
 // Time until the next spawn (spawns come from the cron job every SPAWN_INTERVAL_MINUTES)
@@ -1444,7 +1436,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     // Each trainer gets MAX_CATCH_TRIES attempts per spawn
     if (!spawn.attempts) spawn.attempts = {};
     const used = spawn.attempts[user] || 0;
-    if (used >= MAX_CATCH_TRIES) return `@${user} You're out of tries for this ${spawn.name}! Wait for the next spawn.`;
+    if (used >= MAX_CATCH_TRIES) return `@${user} You're out of tries for this ${spawn.name}! Wait for the next spawn. [emote:4148128:mericCat]`;
 
     spawn.attempts[user] = used + 1;
     if (Math.random() > 0.65) {
@@ -1452,7 +1444,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       const left = MAX_CATCH_TRIES - spawn.attempts[user];
       return left > 0
         ? `@${user} The wild ${spawn.name} broke free! You have ${left} ${left === 1 ? 'try' : 'tries'} left (${spawn.attempts[user]}/${MAX_CATCH_TRIES} used).`
-        : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn. ${FACEPALM_EMOTE}`;
+        : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn. [emote:4148128:mericCat]`;
     }
 
     const caughtMon = await generatePokemon(spawn.id, spawn.isShiny);
@@ -1467,7 +1459,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY})`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
-    reply += ` | ${SITE_NOTE} ${CATCH_EMOTE}`;
+    reply += ` | ${SITE_NOTE} [emote:37232:PeepoClap]`;
     return reply;
   }
 
@@ -1712,7 +1704,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (wasAccepted) recordBattleEnd(db, battle, opponent, 'forfeit', `@${user} forfeited! @${opponent} wins!`);
     delete db.activeBattles[battleKey];
     await saveDB(db);
-    return wasAccepted ? `🏳️ @${user} forfeited! 🏆 @${opponent} wins! ${MOGGED_EMOTE}` : `🏳️ @${user} canceled the challenge.`;
+    return wasAccepted ? `🏳️ @${user} forfeited! 🏆 @${opponent} wins! [emote:5273241:MOGGED]` : `🏳️ @${user} canceled the challenge.`;
   }
 
   if (cmd === 'help' || cmd === 'pokemon') {
