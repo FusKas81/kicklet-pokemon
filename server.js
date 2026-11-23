@@ -1362,9 +1362,9 @@ function applyBattleTimers(db, key, battle) {
   return null;
 }
 
-async function triggerSpawn(db) {
+async function triggerSpawn(db, forceShiny = null) {
   const randomId = Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
-  const mon = await generatePokemon(randomId);
+  const mon = await generatePokemon(randomId, forceShiny);
   const now = Date.now();
   db.activeSpawn = { ...mon, caughtBy: [], attempts: {}, spawnedAt: now, expiresAt: now + CATCH_WINDOW_MS };
   await saveDB(db);
@@ -1403,6 +1403,17 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (!entry || entry.expires < Date.now() || entry.user !== user) return `@${user} That code is invalid or expired. Press LOGIN on the website to get a new one.`;
     entry.verified = true;
     return `✅ @${user} verified! Go back to the website to finish logging in.`;
+  }
+
+  if (cmd === 'shinyspawn') {
+    if (!isMod) return null; // silently ignore everyone except the owner and moderators
+    const live = db.activeSpawn;
+    if (live && Date.now() < spawnExpiresAt(live)) {
+      const secsLeft = Math.ceil((spawnExpiresAt(live) - Date.now()) / 1000);
+      return `@${user} A wild ${live.name} can still be caught (${secsLeft}s left)! Wait until it flees to use !shinyspawn.`;
+    }
+    const spawnMsg = await triggerSpawn(db, true);
+    return `✨ @${user} spawned a SHINY Pokémon! ${spawnMsg}`;
   }
 
   if (cmd === 'spawn') {
@@ -1754,7 +1765,7 @@ app.post('/kick-webhook', async (req, res) => {
     const cmd = parts[0];
     const args = parts.slice(1).join(' ');
 
-    const validCmds = ['spawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
+    const validCmds = ['spawn', 'shinyspawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
     const db = await getDB();
