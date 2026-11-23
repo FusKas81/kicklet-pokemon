@@ -1412,8 +1412,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       const secsLeft = Math.ceil((spawnExpiresAt(live) - Date.now()) / 1000);
       return `@${user} A wild ${live.name} can still be caught (${secsLeft}s left)! Wait until it flees to use !shinyspawn.`;
     }
-    const spawnMsg = await triggerSpawn(db, true);
-    return `✨ @${user} spawned a SHINY Pokémon! ${spawnMsg}`;
+    return await triggerSpawn(db, true);
   }
 
   if (cmd === 'spawn') {
@@ -1430,7 +1429,6 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     }
     const spawnMsg = await triggerSpawn(db);
     db.users[user].lastSpawnCmdAt = Date.now();
-    db.autoSpawnBlockedUntil = Date.now() + SPAWN_INTERVAL_MINUTES * 60 * 1000; // delay the automatic spawn
     await saveDB(db);
     return `🎲 @${user} spawned a random Pokémon! ⏳ !spawn now has a ${SPAWN_CMD_COOLDOWN_MS / 60000} minute cooldown. ${spawnMsg}`;
   }
@@ -1734,6 +1732,9 @@ app.get('/spawn', checkSecret, async (req, res) => {
     const db = await getDB();
     if (Date.now() < (db.autoSpawnBlockedUntil || 0)) {
       return res.send('Skipped: a !spawn was used recently, the automatic spawn is delayed.');
+    }
+    if (db.activeSpawn && Date.now() < spawnExpiresAt(db.activeSpawn)) {
+      return res.send('Skipped: a Pokémon can still be caught, so the automatic spawn waits for the next cycle.');
     }
     db.lastAutoSpawnAt = Date.now();
     const msg = await triggerSpawn(db);
@@ -2943,7 +2944,7 @@ const PAGE = `<!DOCTYPE html>
       what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
       use: '!spawncheck  (or !wild)', ex: '!wild' },
     { n: '!spawn', s: 'Summon a wild Pokémon (owner, mods, subs)',
-      what: 'Spawns a random Pokémon right away. Only the channel owner, moderators and subscribers can use it, only when no Pokémon is catchable, and each user has a 10 minute cooldown. It also delays the next automatic spawn by 5 minutes.',
+      what: 'Spawns a random Pokémon right away. Only the channel owner, moderators and subscribers can use it, only when no Pokémon is catchable, and each user has a 10 minute cooldown.',
       use: '!spawn', ex: '!spawn' },
     { n: '!party', s: 'List your Pokémon and slot numbers',
       what: 'Shows every Pokémon you own with its slot number (max 30). The slot numbers are used by !info, !release, !trade and !battle. Shiny Pokémon have a star. You can also manage your party on this website.',
