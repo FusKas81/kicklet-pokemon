@@ -2849,6 +2849,11 @@ const PAGE = `<!DOCTYPE html>
   #tip b { color:var(--gold); }
   #play .pl-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-bottom:14px; }
   #play .pl-box { background:var(--panel); border:4px solid var(--line); border-radius:10px; padding:14px; font-size:9px; line-height:1.8; }
+  #play .sw { position:relative; }
+  #play .sug { display:none; position:absolute; left:0; right:0; top:100%; margin-top:2px; z-index:50; background:#0f101a; border:3px solid var(--gold); border-radius:6px; max-height:190px; overflow-y:auto; }
+  #play .si { padding:9px; cursor:pointer; font-size:9px; }
+  #play .si:hover, #play .si.on { background:var(--panel2); color:var(--gold); }
+  #play .si.none { color:var(--mute); cursor:default; }
   #play .pl-t { color:var(--gold); font-size:11px; margin-bottom:8px; }
   #play label { display:block; color:var(--mute); font-size:8px; margin:8px 0 4px; }
   #play select, #play input { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
@@ -3437,18 +3442,17 @@ const PAGE = `<!DOCTYPE html>
       if (!s.party.length) {
         $('play-forms').innerHTML = '<div class="pl-note">Catch a Pokémon in chat first, then you can battle and trade here.</div>';
       } else {
-        var who = s.trainers.map(function (n) { return '<option value="' + esc(n) + '"></option>'; }).join('');
         var mons = partyOptions(s.party);
         $('play-forms').innerHTML = '<div class="pl-grid">' +
           '<div class="pl-box"><div class="pl-t">⚔️ CHALLENGE TO A BATTLE</div>' +
-            '<label>1. WHO DO YOU WANT TO FIGHT? (TYPE TO SEARCH)</label><input id="pb-who" list="pl-trainers" placeholder="search trainer..." autocomplete="off">' +
+            '<label>1. WHO DO YOU WANT TO FIGHT? (TYPE TO SEARCH)</label><div class="sw"><input id="pb-who" data-sug="1" placeholder="search trainer..." autocomplete="off"><div class="sug"></div></div>' +
             '<label>2. WHICH POKÉMON FIGHTS FOR YOU?</label><select id="pb-mon">' + mons + '</select>' +
             '<button class="btn yes" data-act="battle-go">CHALLENGE</button></div>' +
           '<div class="pl-box"><div class="pl-t">🔄 OFFER A TRADE</div>' +
-            '<label>1. WHO DO YOU WANT TO TRADE WITH? (TYPE TO SEARCH)</label><input id="pt-who" list="pl-trainers" placeholder="search trainer..." autocomplete="off">' +
+            '<label>1. WHO DO YOU WANT TO TRADE WITH? (TYPE TO SEARCH)</label><div class="sw"><input id="pt-who" data-sug="1" placeholder="search trainer..." autocomplete="off"><div class="sug"></div></div>' +
             '<label>2. WHICH POKÉMON DO YOU GIVE?</label><select id="pt-mon">' + mons + '</select>' +
             '<button class="btn yes" data-act="trade-go">OFFER TRADE</button></div>' +
-          '</div><datalist id="pl-trainers">' + who + '</datalist>';
+          '</div>';
       }
     }
 
@@ -3515,6 +3519,47 @@ const PAGE = `<!DOCTYPE html>
     pollPlay();
     load();
   }
+
+  // live trainer suggestions while typing
+  function showSug(inp) {
+    var box = inp.parentNode.querySelector('.sug');
+    if (!box || !playState) return;
+    var q = inp.value.trim().toLowerCase().split('@').join('');
+    var all = playState.trainers;
+    var list = all.filter(function (n) { return n.indexOf(q) === 0; })
+      .concat(all.filter(function (n) { return n.indexOf(q) > 0; })).slice(0, 8);
+    box.innerHTML = list.length
+      ? list.map(function (n, i) { return '<div class="si' + (i === 0 ? ' on' : '') + '" data-name="' + esc(n) + '">@' + esc(n) + '</div>'; }).join('')
+      : '<div class="si none">no trainer found</div>';
+    box.style.display = 'block';
+  }
+  function hideSug() {
+    var boxes = document.querySelectorAll('#play .sug');
+    for (var i = 0; i < boxes.length; i++) boxes[i].style.display = 'none';
+  }
+  $('play').addEventListener('input', function (e) { if (e.target && e.target.getAttribute && e.target.getAttribute('data-sug')) showSug(e.target); });
+  $('play').addEventListener('focusin', function (e) { if (e.target && e.target.getAttribute && e.target.getAttribute('data-sug')) showSug(e.target); });
+  $('play').addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (!t || !t.getAttribute || !t.getAttribute('data-sug')) return;
+    if (e.key === 'Escape') { hideSug(); return; }
+    if (e.key === 'Enter') {
+      var first = t.parentNode.querySelector('.si[data-name]');
+      if (first) { t.value = first.getAttribute('data-name'); hideSug(); }
+      e.preventDefault();
+    }
+  });
+  $('play').addEventListener('mousedown', function (e) {
+    var it = e.target.closest ? e.target.closest('.si[data-name]') : null;
+    if (!it) return;
+    e.preventDefault();
+    var inp = it.parentNode.parentNode.querySelector('input');
+    inp.value = it.getAttribute('data-name');
+    hideSug();
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (!(e.target.closest && e.target.closest('#play .sw'))) hideSug();
+  });
 
   $('play').addEventListener('click', function (e) {
     var el = e.target.closest ? e.target.closest('[data-act]') : null;
