@@ -62,7 +62,7 @@ const MAX_INVENTORY = 50;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
-const CATCH_WINDOW_MS = 60 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
+const CATCH_WINDOW_MS = 90 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
@@ -1195,6 +1195,18 @@ function markShiny(db, user, mon) {
   if (!db.users[user].shinies.includes(mon.id)) db.users[user].shinies.push(mon.id);
 }
 
+// Remember the FIRST time a trainer got each species (and each shiny species). Later catches never change it.
+function recordFirstCatch(db, user, mon) {
+  const u = db.users[user];
+  if (!mon || !u) return;
+  if (!u.dexDates || typeof u.dexDates !== 'object') u.dexDates = {};
+  if (!u.dexDates[mon.id]) u.dexDates[mon.id] = Date.now();
+  if (mon.isShiny) {
+    if (!u.shinyDates || typeof u.shinyDates !== 'object') u.shinyDates = {};
+    if (!u.shinyDates[mon.id]) u.shinyDates[mon.id] = Date.now();
+  }
+}
+
 async function checkEvolution(db, user) {
   const inv = db.users[user].inventory;
   const counts = {};
@@ -1225,6 +1237,7 @@ async function checkEvolution(db, user) {
     db.users[user].inventory.push(evolvedMon);
     if (!db.users[user].pokedex.includes(evolvedMon.id)) db.users[user].pokedex.push(evolvedMon.id);
     markShiny(db, user, evolvedMon);
+    recordFirstCatch(db, user, evolvedMon);
     await saveDB(db);
 
     const shinyTag = isShinyGroup ? '✨SHINY ' : '';
@@ -1474,6 +1487,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     db.users[user].totalCaught += 1;
     if (!db.users[user].pokedex.includes(caughtMon.id)) db.users[user].pokedex.push(caughtMon.id);
     markShiny(db, user, caughtMon);
+    recordFirstCatch(db, user, caughtMon);
     spawn.caughtBy.push(user);
     await saveDB(db);
 
@@ -1615,6 +1629,8 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (!db.users[trade.fromUser].pokedex.includes(myMon.id)) db.users[trade.fromUser].pokedex.push(myMon.id);
     markShiny(db, user, senderMon);
     markShiny(db, trade.fromUser, myMon);
+    recordFirstCatch(db, user, senderMon);
+    recordFirstCatch(db, trade.fromUser, myMon);
 
     await saveDB(db);
 
@@ -2249,7 +2265,7 @@ app.get('/overlay', (req, res) => {
       var txt = $('spawn-timer');
       var bar = $('spawn-bar');
       if (!lastSpawn) return;
-      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 60000);
+      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 90000);
       var total = Math.max(1, expires - lastSpawn.spawnedAt);
       var left = Math.max(0, expires - serverNow());
       var secs = Math.ceil(left / 1000);
@@ -2322,7 +2338,7 @@ app.get('/overlay', (req, res) => {
 
         // spawned Pokémon (centre of the screen)
         var s = data.spawn;
-        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 60000))) {
+        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 90000))) {
           lastSpawn = s;
           card.style.display = 'block';
           var banner = $('spawn-banner');
@@ -2432,6 +2448,8 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID,
               totalCaught: u.totalCaught !== undefined ? u.totalCaught : inv.length,
               battleWins: u.battleWins || 0,
               pokedex: dex.slice().sort((a, b) => a - b),
+              dexDates: (u.dexDates && typeof u.dexDates === 'object') ? u.dexDates : {},
+              shinyDates: (u.shinyDates && typeof u.shinyDates === 'object') ? u.shinyDates : {},
               shinies: [...shinySet].sort((a, b) => a - b),
               party: inv.map((p, i) => ({ slot: i, id: p.id, name: p.name, shiny: Boolean(p.isShiny), level: p.level || 50, moves: (Array.isArray(p.moves) ? p.moves : []).map((m) => ({ n: m.name, t: m.type, p: m.power, pp: m.maxPp })) }))
             };
@@ -2722,6 +2740,9 @@ const PAGE = `<!DOCTYPE html>
   /* tooltip, modal, toast */
   #tip { position:fixed; z-index:99999; display:none; max-width:260px; background:#000; border:3px solid var(--gold); border-radius:8px; padding:8px 10px; font-size:8px; line-height:1.8; pointer-events:none; }
   #tip b { color:var(--gold); }
+  #tip .big { display:block; margin:4px auto 6px; width:96px; height:96px; object-fit:contain; image-rendering:pixelated; }
+  #tip .date { color:var(--mute); }
+  .cell:not(.no), .scell { cursor:help; }
   #tip em { color:#fca5a5; font-style:normal; }
   #ov { position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,.75); display:none; align-items:center; justify-content:center; padding:16px; }
   #modal { background:var(--panel); border:5px solid var(--gold); border-radius:12px; padding:20px; width:100%; max-width:480px; text-align:center; font-size:10px; line-height:1.9; animation:pop .25s cubic-bezier(.2,1.5,.4,1); }
@@ -2940,6 +2961,21 @@ const PAGE = `<!DOCTYPE html>
     return head + mv + '<br><br>Log in (button below the leaderboards) to manage your party';
   }
 
+  function dexTipHtml(el) {
+    var id = Number(el.getAttribute('data-dex'));
+    var shiny = el.getAttribute('data-kind') === 'shiny';
+    var owner = el.getAttribute('data-user');
+    var u = null;
+    for (var i = 0; i < data.users.length; i++) if (data.users[i].name === owner) u = data.users[i];
+    var nm = byId[id] ? pretty(byId[id].name) : '#' + id;
+    var ts = u ? (shiny ? (u.shinyDates || {})[id] : (u.dexDates || {})[id]) : null;
+    var when = ts ? new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'not recorded (caught before dates were tracked)';
+    var gif = BASE + '/versions/generation-v/black-white/animated/' + (shiny ? 'shiny/' : '') + id + '.gif';
+    return '<img class="big" src="' + gif + '" alt="" data-fb="' + png(id, shiny) + '" onerror="this.onerror=null;this.src=this.dataset.fb">' +
+      '<b>' + (shiny ? '✨ ' : '') + esc(nm) + '</b> #' + id +
+      '<br><span class="date">First caught: ' + esc(when) + '</span>';
+  }
+
   function releaseConfirm(el) {
     var name = pretty(el.getAttribute('data-name'));
     var shiny = el.getAttribute('data-shiny') === '1';
@@ -2981,7 +3017,7 @@ const PAGE = `<!DOCTYPE html>
   // ---------- chat commands list ----------
   var COMMANDS = [
     { n: '!catch', s: 'Throw a Pokéball at the wild Pokémon',
-      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 60 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
+      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 90 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
       use: '!catch', ex: '!catch' },
     { n: '!spawncheck / !wild', s: 'See the wild Pokémon right now',
       what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
@@ -3042,10 +3078,11 @@ const PAGE = `<!DOCTYPE html>
   // ---------- tooltips + party click ----------
   (function wireTips() {
     var tip = $('tip');
-    function hide() { tip.style.display = 'none'; }
+    var lastHtml = null;
+    function hide() { tip.style.display = 'none'; lastHtml = null; }
     function show(e, html, wide) {
       tip.style.maxWidth = wide ? '360px' : '280px';
-      tip.innerHTML = html;
+      if (html !== lastHtml) { tip.innerHTML = html; lastHtml = html; } // keep the animation running while the mouse moves
       tip.style.display = 'block';
       var x = Math.min(e.clientX + 16, window.innerWidth - tip.offsetWidth - 8);
       var y = e.clientY + 20;
@@ -3055,6 +3092,8 @@ const PAGE = `<!DOCTYPE html>
     }
     var box = $('trainers'), cmds = $('cmds');
     box.addEventListener('mousemove', function (e) {
+      var dx = e.target.closest ? e.target.closest('[data-dex]') : null;
+      if (dx) { show(e, dexTipHtml(dx), false); return; }
       var el = e.target.closest ? e.target.closest('.pm') : null;
       if (!el) { hide(); return; }
       show(e, tipHtml(el), false);
@@ -3180,13 +3219,13 @@ const PAGE = `<!DOCTYPE html>
       var cells = data.species.map(function (sp) {
         var has = dex[sp.id] || held[sp.id];
         var cls = 'cell' + (has ? '' : ' no') + (held[sp.id] ? ' held' : '');
-        var title = has ? pretty(sp.name) + (held[sp.id] ? ' (in party)' : ' (caught before)') : '???';
-        return '<div class="' + cls + '" title="' + esc(title) + '"><span class="n">' + sp.id + '</span><img loading="lazy" src="' + png(sp.id, false) + '" alt=""></div>';
+        var attrs = has ? ' data-dex="' + sp.id + '" data-kind="dex" data-user="' + esc(u.name) + '"' : ' title="???"';
+        return '<div class="' + cls + '"' + attrs + '><span class="n">' + sp.id + '</span><img loading="lazy" src="' + png(sp.id, false) + '" alt=""></div>';
       }).join('');
       var shinyHtml = u.shinies.length
         ? u.shinies.map(function (id) {
             var nm = byId[id] ? pretty(byId[id].name) : '#' + id;
-            return '<div class="scell" title="' + esc(nm) + '"><img loading="lazy" src="' + png(id, true) + '" alt=""><span>' + esc(nm) + '</span></div>';
+            return '<div class="scell" data-dex="' + id + '" data-kind="shiny" data-user="' + esc(u.name) + '"><img loading="lazy" src="' + png(id, true) + '" alt=""><span>' + esc(nm) + '</span></div>';
           }).join('')
         : '<div class="sempty">NO SHINIES YET</div>';
       var partyHtml = u.party.length
