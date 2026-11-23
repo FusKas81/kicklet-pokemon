@@ -46,6 +46,16 @@ async function saveDB(doc) {
   await doc.save();
 }
 
+// All load -> change -> save cycles on the game state run one at a time. Without this, two commands
+// arriving together (e.g. two !catch) both load the same state and the last save erases the other's changes.
+let dbChain = Promise.resolve();
+function lockDB() {
+  let release;
+  const prev = dbChain;
+  dbChain = new Promise((r) => { release = r; });
+  return prev.then(() => release);
+}
+
 const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
 const MAX_INVENTORY = 30;
@@ -173,13 +183,16 @@ app.get('/kick-callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
-    const db = await getDB();
+    const unlockAuth = await lockDB();
+    let db;
+    try { db = await getDB();
     db.kickAuth = {
       access_token: data.access_token,
       refresh_token: data.refresh_token,
       expires_at: Date.now() + data.expires_in * 1000
     };
     await saveDB(db);
+    } finally { unlockAuth(); }
     await subscribeKickChatWebhook(data.access_token);
 
     res.send('✅ Kick connected! Your Pokémon bot is now listening to chat and posting directly.');
@@ -1728,7 +1741,9 @@ app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
 // Triggered every 5 mins by cron-job.org (posts directly to Kick chat + OBS)
 app.get('/spawn', checkSecret, async (req, res) => {
+  let unlock;
   try {
+    unlock = await lockDB();
     const db = await getDB();
     if (Date.now() < (db.autoSpawnBlockedUntil || 0)) {
       return res.send('Skipped: a !spawn was used recently, the automatic spawn is delayed.');
@@ -1743,12 +1758,15 @@ app.get('/spawn', checkSecret, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.send('⚠️ Spawn error.');
+  } finally {
+    if (unlock) unlock();
   }
 });
 
 // Direct Kick Webhook Receiver (Listens to Kick chat messages)
 app.post('/kick-webhook', async (req, res) => {
   res.sendStatus(200); // Acknowledge Kick immediately
+  let unlock;
   try {
     const eventType = req.headers['kick-event-type'];
     if (eventType !== 'chat.message.sent') return;
@@ -1769,12 +1787,15 @@ app.post('/kick-webhook', async (req, res) => {
     const validCmds = ['spawn', 'shinyspawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
+    unlock = await lockDB();
     const db = await getDB();
     const isSub = badges.some(b => ['subscriber', 'founder'].includes(b.type));
     const reply = await processCommand(db, sender, cmd, args, isMod, isSub);
     if (reply) await sendKickChat(db, reply);
   } catch (err) {
     console.error('❌ Webhook processing error:', err.message);
+  } finally {
+    if (unlock) unlock();
   }
 });
 
@@ -2334,8 +2355,10 @@ let battleTickRunning = false;
 setInterval(async () => {
   if (battleTickRunning) return;
   battleTickRunning = true;
+  let unlock;
   try {
     if (mongoose.connection.readyState !== 1) return;
+    unlock = await lockDB();
     const db = await getDB();
     const messages = [];
 
@@ -2367,6 +2390,7 @@ setInterval(async () => {
   } catch (err) {
     console.error('❌ Battle timer error:', err.message);
   } finally {
+    if (unlock) unlock();
     battleTickRunning = false;
   }
 }, 3000);
@@ -2379,7 +2403,7 @@ setInterval(async () => {
 // API:     /api/pokedex        -> public JSON (no secrets, no internal uids)
 //          /api/login/start, /api/login/status, /api/me, /api/logout, /api/release
 
-function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
+function registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
   const species = Object.entries(GEN2.mons)
     .map(([id, m]) => ({ id: Number(id), name: m.n, types: m.t }))
     .sort((a, b) => a.id - b.id);
@@ -2459,6 +2483,7 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
   });
 
   app.post('/api/login/status', async (req, res) => {
+    let unlock;
     try {
       const body = req.body || {};
       const code = String(body.code || '').toUpperCase();
@@ -2469,6 +2494,7 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
       if (!entry.verified) return res.json({ status: 'pending' });
 
       webLogins.delete(code);
+      unlock = await lockDB();
       const db = await getDB();
       if (!db.webSessions) db.webSessions = {};
       for (const k of Object.keys(db.webSessions)) if (db.webSessions[k].expires < now) delete db.webSessions[k];
@@ -2479,6 +2505,8 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
     } catch (e) {
       console.error('❌ /api/login/status error:', e.message);
       res.status(500).json({ error: 'Something went wrong.' });
+    } finally {
+      if (unlock) unlock();
     }
   });
 
@@ -2492,7 +2520,9 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
   }
 
   app.get('/api/me', async (req, res) => {
+    let unlock;
     try {
+      unlock = await lockDB();
       const db = await getDB();
       const user = sessionUser(db, req);
       if (!user) return res.status(401).json({ error: 'not logged in' });
@@ -2506,11 +2536,15 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
       res.json({ user });
     } catch (e) {
       res.status(500).json({ error: 'failed' });
+    } finally {
+      if (unlock) unlock();
     }
   });
 
   app.post('/api/logout', async (req, res) => {
+    let unlock;
     try {
+      unlock = await lockDB();
       const db = await getDB();
       const h = req.headers.authorization || '';
       const token = h.startsWith('Bearer ') ? h.slice(7) : '';
@@ -2521,12 +2555,16 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: 'failed' });
+    } finally {
+      if (unlock) unlock();
     }
   });
 
   // ---------- release a Pokémon from your own party ----------
   app.post('/api/release', async (req, res) => {
+    let unlock;
     try {
+      unlock = await lockDB();
       const db = await getDB();
       const user = sessionUser(db, req);
       if (!user) return res.status(401).json({ error: 'Please log in again.' });
@@ -2545,6 +2583,8 @@ function registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogi
     } catch (e) {
       console.error('❌ /api/release error:', e.message);
       res.status(500).json({ error: 'Something went wrong.' });
+    } finally {
+      if (unlock) unlock();
     }
   });
 
@@ -3194,7 +3234,7 @@ const PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-registerPokedexSite(app, { getDB, saveDB, GEN2, MAX_POKEMON_ID, webLogins, crypto });
+registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID, webLogins, crypto });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
