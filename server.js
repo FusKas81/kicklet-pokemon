@@ -2392,8 +2392,8 @@ setInterval(async () => {
         const shinyTag = spawn.isShiny ? '✨SHINY ' : '';
         const catchers = spawn.caughtBy || [];
         messages.push(catchers.length > 0
-          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')}. Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`
-          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`);
+          ? `💨 The wild ${shinyTag}${spawn.name} fled! Caught by: ${catchers.map(u => '@' + u).join(', ')} [emote:37232:PeepoClap]. Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`
+          : `💨 The wild ${shinyTag}${spawn.name} fled... nobody caught it! [emote:5756621:kkHuh] Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`);
       } else {
         messages.push(null);
       }
