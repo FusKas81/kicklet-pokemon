@@ -2419,7 +2419,7 @@ setInterval(async () => {
 // API:     /api/pokedex        -> public JSON (no secrets, no internal uids)
 //          /api/login/start, /api/login/status, /api/me, /api/logout, /api/release
 
-function registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
+function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
   const species = Object.entries(GEN2.mons)
     .map(([id, m]) => ({ id: Number(id), name: m.n, types: m.t }))
     .sort((a, b) => a.id - b.id);
@@ -2606,6 +2606,113 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID,
     }
   });
 
+  // ---------- battle & trade from the website (logged-in trainers only) ----------
+  const playHits = new Map(); // user -> last action time (rate limit)
+  const cleanMsg = (m) => String(m || '').replace(/\[emote:[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+
+  function battleKeyOf(db, user) {
+    return Object.keys(db.activeBattles || {}).find((k) => { const b = db.activeBattles[k]; return b && (b.p1 === user || b.p2 === user); });
+  }
+
+  app.get('/api/play/state', async (req, res) => {
+    try {
+      const db = await getDB();
+      const user = sessionUser(db, req);
+      if (!user) return res.status(401).json({ error: 'not logged in' });
+      const inv = (db.users[user] && Array.isArray(db.users[user].inventory)) ? db.users[user].inventory : [];
+      const party = inv.map((p, i) => ({ slot: i + 1, name: p.name, shiny: Boolean(p.isShiny), level: p.level || 50 }));
+      const trainers = Object.keys(db.users || {})
+        .filter((n) => n !== user && Array.isArray(db.users[n].inventory) && db.users[n].inventory.length > 0)
+        .sort();
+
+      const pt = db.pendingTrades || {};
+      let tradeIn = null, tradeOut = null;
+      if (pt[user]) tradeIn = { from: pt[user].fromUser, name: pt[user].offeredName };
+      for (const to of Object.keys(pt)) {
+        if (pt[to] && pt[to].fromUser === user) { tradeOut = { to, name: pt[to].offeredName }; break; }
+      }
+
+      let battle = null;
+      const key = battleKeyOf(db, user);
+      if (key) {
+        const b = db.activeBattles[key];
+        const opp = b.p1 === user ? b.p2 : b.p1;
+        if (!b.p2Mon) {
+          battle = { state: b.p1 === user ? 'challenging' : 'challenged', opponent: opp, theirMon: b.p1Mon ? b.p1Mon.name : '' };
+        } else {
+          const side = b.p1 === user ? 'p1' : 'p2';
+          const mine = b[side + 'Mon'];
+          const theirs = b[side === 'p1' ? 'p2Mon' : 'p1Mon'];
+          battle = {
+            state: 'active', opponent: opp, round: b.round || 1,
+            pick: b.pickState ? b.pickState[side] : 'wait',
+            secsLeft: Math.max(0, Math.ceil(((b.roundStartedAt || Date.now()) + MOVE_LIMIT_MS - Date.now()) / 1000)),
+            mine: { name: mine.name, hp: Math.max(0, mine.currentHp), maxHp: mine.maxHp,
+                    moves: (mine.moves || []).map((m) => ({ name: m.name, pp: m.pp, maxPp: m.maxPp, off: m.pp <= 0 || mine.disabled === m.k })) },
+            theirs: { name: theirs.name, hp: Math.max(0, theirs.currentHp), maxHp: theirs.maxHp },
+            log: b.lastLog || ''
+          };
+        }
+      }
+      res.json({ me: user, party, trainers, tradeIn, tradeOut, battle });
+    } catch (e) {
+      console.error('❌ /api/play/state error:', e.message);
+      res.status(500).json({ error: 'failed' });
+    }
+  });
+
+  app.post('/api/play/action', async (req, res) => {
+    try {
+      const db0 = await getDB();
+      const user = sessionUser(db0, req);
+      if (!user) return res.status(401).json({ error: 'Please log in again.' });
+      const now = Date.now();
+      if (now - (playHits.get(user) || 0) < 1200) return res.status(429).json({ error: 'Slow down a little.' });
+      playHits.set(user, now);
+
+      const body = req.body || {};
+      const action = String(body.action || '');
+      const num = (v, max) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= max ? n : null; };
+      const nameOf = (v) => String(v || '').toLowerCase().replace('@', '').trim();
+      let reply = null;
+
+      if (action === 'battle' || action === 'trade') {
+        const who = nameOf(action === 'battle' ? body.opponent : body.target);
+        const slot = num(body.slot, 500);
+        if (!who || who.length > 40 || /\s/.test(who) || !slot) return res.status(400).json({ error: 'Pick a trainer and one of your Pokémon.' });
+        reply = await runCommand(user, action, who + ' ' + slot);
+      } else if (action === 'accept') {
+        const slot = num(body.slot, 500);
+        if (!slot) return res.status(400).json({ error: 'Pick one of your Pokémon.' });
+        reply = await runCommand(user, 'accept', String(slot));
+      } else if (action === 'move') {
+        const mv = num(body.slot, 4);
+        if (!mv) return res.status(400).json({ error: 'Pick a move.' });
+        reply = await runCommand(user, 'move', String(mv));
+      } else if (action === 'forfeit') {
+        reply = await runCommand(user, 'forfeit', '');
+      } else if (action === 'declineTrade' || action === 'cancelTrade') {
+        const unlock = await lockDB();
+        try {
+          const db = await getDB();
+          const pt = db.pendingTrades || {};
+          if (action === 'declineTrade') delete pt[user];
+          else for (const to of Object.keys(pt)) if (pt[to] && pt[to].fromUser === user) delete pt[to];
+          db.pendingTrades = pt;
+          await saveDB(db);
+        } finally { unlock(); }
+        reply = action === 'declineTrade' ? 'Trade declined.' : 'Trade offer canceled.';
+      } else {
+        return res.status(400).json({ error: 'Unknown action.' });
+      }
+      cache = { at: 0, data: null };
+      res.json({ ok: true, message: cleanMsg(reply) });
+    } catch (e) {
+      console.error('❌ /api/play/action error:', e.message);
+      res.status(500).json({ error: 'Something went wrong.' });
+    }
+  });
+
   app.get(['/pokedex', '/pokedex/'], (req, res) => res.type('html').send(PAGE));
 }
 
@@ -2740,6 +2847,24 @@ const PAGE = `<!DOCTYPE html>
   /* tooltip, modal, toast */
   #tip { position:fixed; z-index:99999; display:none; max-width:260px; background:#000; border:3px solid var(--gold); border-radius:8px; padding:8px 10px; font-size:8px; line-height:1.8; pointer-events:none; }
   #tip b { color:var(--gold); }
+  #play .pl-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-bottom:14px; }
+  #play .pl-box { background:var(--panel); border:4px solid var(--line); border-radius:10px; padding:14px; font-size:9px; line-height:1.8; }
+  #play .pl-t { color:var(--gold); font-size:11px; margin-bottom:8px; }
+  #play label { display:block; color:var(--mute); font-size:8px; margin:8px 0 4px; }
+  #play select { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
+  #play .pl-box .btn { margin-top:10px; width:100%; }
+  #play .pl-note { background:var(--panel2); border:3px solid var(--gold); border-radius:10px; padding:12px 14px; font-size:9px; line-height:1.9; margin-bottom:10px; }
+  #play .pl-note b { color:var(--gold); }
+  #play .pl-row { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  #play .pl-row .btn { flex:1; min-width:120px; }
+  #play .btn.yes { background:#16a34a; }
+  #play .btn.no { background:#b91c1c; }
+  #play .btn:disabled { opacity:.5; cursor:not-allowed; }
+  #play .hpbar { height:12px; background:#0f101a; border:2px solid var(--line); border-radius:6px; overflow:hidden; margin:3px 0 8px; }
+  #play .hpbar i { display:block; height:100%; background:#22c55e; transition:width .4s; }
+  #play .mvs { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+  #play .mvs .btn { margin:0; width:auto; font-size:8px; }
+  #play .pl-log { color:var(--mute); font-size:8px; margin-top:10px; }
   #tip .big { display:block; margin:4px auto 6px; width:96px; height:96px; object-fit:contain; image-rendering:pixelated; }
   #tip .date { color:var(--mute); }
   .cell:not(.no), .scell { cursor:help; }
@@ -2788,6 +2913,12 @@ const PAGE = `<!DOCTYPE html>
   <div id="auth"></div>
 </section>
 
+<section id="play" style="display:none">
+  <h2><span>⚔️ BATTLE &amp; TRADE</span></h2>
+  <div id="play-forms"></div>
+  <div id="play-status"></div>
+</section>
+
 <section>
   <h2><span>TRAINERS</span> <input id="search" placeholder="search trainer..."></h2>
   <div id="trainers"></div>
@@ -2833,7 +2964,9 @@ const PAGE = `<!DOCTYPE html>
     if (me) {
       $('auth').innerHTML = '<span class="who">LOGGED IN: @' + esc(me) + '</span><button class="btn sm" id="b-out">LOG OUT</button>';
       $('b-out').onclick = logout;
+      startPlay();
     } else {
+      stopPlay();
       $('auth').innerHTML = '<button class="btn login-btn" id="b-in">LOGIN TO MANAGE YOUR PARTY</button>';
       $('b-in').onclick = openLogin;
     }
@@ -3267,6 +3400,150 @@ const PAGE = `<!DOCTYPE html>
     }
   }
 
+  // ---------- battle & trade panel (logged-in trainers only) ----------
+  var playTimer = null, playState = null, playFormSig = '', playStatusSig = '';
+
+  function stopPlay() {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+    playState = null; playFormSig = ''; playStatusSig = '';
+    $('play').style.display = 'none';
+  }
+  function startPlay() {
+    $('play').style.display = 'block';
+    if (!playTimer) playTimer = setInterval(pollPlay, 3000);
+    pollPlay();
+  }
+  function partyOptions(party) {
+    return party.map(function (p) {
+      return '<option value="' + p.slot + '">' + p.slot + '. ' + (p.shiny ? '✨ ' : '') + esc(pretty(p.name)) + ' Lv' + p.level + '</option>';
+    }).join('');
+  }
+  async function pollPlay() {
+    if (!me || !token || document.hidden) return;
+    try {
+      var r = await fetch('/api/play/state', { headers: { Authorization: 'Bearer ' + token } });
+      if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); return; }
+      if (!r.ok) return;
+      playState = await r.json();
+      renderPlay();
+    } catch (e) {}
+  }
+  function renderPlay() {
+    var s = playState;
+    if (!s) return;
+    var formSig = JSON.stringify([s.party, s.trainers]);
+    if (formSig !== playFormSig) {
+      playFormSig = formSig;
+      if (!s.party.length) {
+        $('play-forms').innerHTML = '<div class="pl-note">Catch a Pokémon in chat first, then you can battle and trade here.</div>';
+      } else {
+        var who = '<option value="">choose a trainer...</option>' + s.trainers.map(function (n) { return '<option value="' + esc(n) + '">@' + esc(n) + '</option>'; }).join('');
+        var mons = partyOptions(s.party);
+        $('play-forms').innerHTML = '<div class="pl-grid">' +
+          '<div class="pl-box"><div class="pl-t">⚔️ CHALLENGE TO A BATTLE</div>' +
+            '<label>1. WHO DO YOU WANT TO FIGHT?</label><select id="pb-who">' + who + '</select>' +
+            '<label>2. WHICH POKÉMON FIGHTS FOR YOU?</label><select id="pb-mon">' + mons + '</select>' +
+            '<button class="btn yes" data-act="battle-go">CHALLENGE</button></div>' +
+          '<div class="pl-box"><div class="pl-t">🔄 OFFER A TRADE</div>' +
+            '<label>1. WHO DO YOU WANT TO TRADE WITH?</label><select id="pt-who">' + who + '</select>' +
+            '<label>2. WHICH POKÉMON DO YOU GIVE?</label><select id="pt-mon">' + mons + '</select>' +
+            '<button class="btn yes" data-act="trade-go">OFFER TRADE</button></div>' +
+          '</div>';
+      }
+    }
+
+    // status: things waiting for you (selects are only rebuilt when something changes, so your choice is not lost)
+    var b = s.battle;
+    var stSig = JSON.stringify([s.tradeIn, s.tradeOut, b && b.state !== 'active' ? b : (b ? 'active' : null), s.party.length]);
+    var h = '';
+    if (b && b.state === 'active') {
+      var mine = b.mine, th = b.theirs;
+      var pct = function (x) { return x.maxHp ? Math.max(0, Math.min(100, x.hp / x.maxHp * 100)) : 0; };
+      var msg = b.pick === 'wait' ? 'Your turn! Choose a move (' + b.secsLeft + 's left).' : (b.pick === 'done' ? 'Move chosen. Waiting for @' + esc(b.opponent) + '...' : 'Your Pokémon acts on its own this round.');
+      h += '<div class="pl-note"><b>⚔️ BATTLE vs @' + esc(b.opponent) + ' - ROUND ' + b.round + '</b>' +
+        '<div>YOU: ' + esc(pretty(mine.name)) + ' (' + mine.hp + '/' + mine.maxHp + ' HP)</div><div class="hpbar"><i style="width:' + pct(mine).toFixed(0) + '%"></i></div>' +
+        '<div>@' + esc(b.opponent) + ': ' + esc(pretty(th.name)) + ' (' + th.hp + '/' + th.maxHp + ' HP)</div><div class="hpbar"><i style="width:' + pct(th).toFixed(0) + '%"></i></div>' +
+        '<div>' + msg + '</div><div class="mvs">' +
+        mine.moves.map(function (m, i) {
+          return '<button class="btn" data-act="move" data-mv="' + (i + 1) + '"' + (b.pick !== 'wait' || m.off ? ' disabled' : '') + '>' + esc(pretty(m.name)) + '<br>' + m.pp + '/' + m.maxPp + ' PP</button>';
+        }).join('') + '</div>' +
+        '<div class="pl-row"><button class="btn no" data-act="forfeit-active">FORFEIT</button></div>' +
+        (b.log ? '<div class="pl-log">' + esc(b.log) + '</div>' : '') + '</div>';
+      $('play-status').innerHTML = h;
+      playStatusSig = 'active';
+      return;
+    }
+    if (stSig === playStatusSig) return;
+    playStatusSig = stSig;
+    if (b && b.state === 'challenged') {
+      h += '<div class="pl-note"><b>⚔️ @' + esc(b.opponent) + ' CHALLENGED YOU</b> with ' + esc(pretty(b.theirMon)) + '.' +
+        '<label>PICK YOUR POKÉMON TO FIGHT WITH</label><select id="pa-mon">' + partyOptions(s.party) + '</select>' +
+        '<div class="pl-row"><button class="btn yes" data-act="accept-battle">ACCEPT BATTLE</button><button class="btn no" data-act="forfeit">DECLINE</button></div></div>';
+    } else if (b && b.state === 'challenging') {
+      h += '<div class="pl-note"><b>⚔️ WAITING FOR @' + esc(b.opponent) + '</b> to accept your challenge (5 minutes).' +
+        '<div class="pl-row"><button class="btn no" data-act="forfeit">CANCEL CHALLENGE</button></div></div>';
+    }
+    if (s.tradeIn) {
+      h += '<div class="pl-note"><b>🔄 @' + esc(s.tradeIn.from) + ' OFFERS YOU ' + esc(pretty(s.tradeIn.name)) + '</b>' +
+        '<label>PICK THE POKÉMON YOU GIVE IN RETURN</label><select id="pi-mon">' + partyOptions(s.party) + '</select>' +
+        '<div class="pl-row"><button class="btn yes" data-act="accept-trade">ACCEPT TRADE</button><button class="btn no" data-act="decline-trade">DECLINE</button></div></div>';
+    }
+    if (s.tradeOut) {
+      h += '<div class="pl-note"><b>🔄 YOU OFFERED ' + esc(pretty(s.tradeOut.name)) + ' TO @' + esc(s.tradeOut.to) + '</b>. Waiting for them to accept.' +
+        '<div class="pl-row"><button class="btn no" data-act="cancel-trade">CANCEL OFFER</button></div></div>';
+    }
+    $('play-status').innerHTML = h;
+  }
+
+  async function playAct(body, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      var r = await fetch('/api/play/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(body)
+      });
+      var j = await r.json();
+      if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); openLogin('Your login expired. Please log in again.'); return; }
+      toast(j.message || j.error || (r.ok ? 'Done.' : 'Something went wrong.'));
+    } catch (e) {
+      toast('Could not reach the server.');
+    }
+    if (btn) btn.disabled = false;
+    playStatusSig = '';
+    lastJson = '';
+    pollPlay();
+    load();
+  }
+
+  $('play').addEventListener('click', function (e) {
+    var el = e.target.closest ? e.target.closest('[data-act]') : null;
+    if (!el || el.disabled) return;
+    var act = el.getAttribute('data-act');
+    var val = function (id) { var x = $(id); return x ? x.value : ''; };
+    if (act === 'battle-go') {
+      if (!val('pb-who')) { toast('Pick a trainer to fight first.'); return; }
+      playAct({ action: 'battle', opponent: val('pb-who'), slot: val('pb-mon') }, el);
+    } else if (act === 'trade-go') {
+      if (!val('pt-who')) { toast('Pick a trainer to trade with first.'); return; }
+      playAct({ action: 'trade', target: val('pt-who'), slot: val('pt-mon') }, el);
+    } else if (act === 'accept-battle') {
+      playAct({ action: 'battle', opponent: playState.battle.opponent, slot: val('pa-mon') }, el);
+    } else if (act === 'accept-trade') {
+      playAct({ action: 'accept', slot: val('pi-mon') }, el);
+    } else if (act === 'decline-trade') {
+      playAct({ action: 'declineTrade' }, el);
+    } else if (act === 'cancel-trade') {
+      playAct({ action: 'cancelTrade' }, el);
+    } else if (act === 'move') {
+      playAct({ action: 'move', slot: el.getAttribute('data-mv') }, el);
+    } else if (act === 'forfeit') {
+      playAct({ action: 'forfeit' }, el);
+    } else if (act === 'forfeit-active') {
+      if (window.confirm('Forfeit this battle? Your opponent wins.')) playAct({ action: 'forfeit' }, el);
+    }
+  });
+
   $('search').oninput = function () { if (data) renderTrainers(); };
   renderAuth();
   renderCommands();
@@ -3276,7 +3553,22 @@ const PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-registerPokedexSite(app, { getDB, saveDB, lockDB, GEN2, MAX_POKEMON_ID, webLogins, crypto });
+// Runs a bot command on behalf of a website-logged-in trainer (same rules as typing it in chat) and posts the result to the stream chat.
+async function runCommand(user, cmd, args) {
+  const unlock = await lockDB();
+  try {
+    const db = await getDB();
+    const reply = await processCommand(db, user, cmd, args, false, false);
+    if (reply) {
+      try { await sendKickChat(db, reply); } catch (e) { console.error('❌ Could not post website command to chat:', e.message); }
+    }
+    return reply;
+  } finally {
+    unlock();
+  }
+}
+
+registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
