@@ -1431,6 +1431,27 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     return `✅ @${user} verified! Go back to the website to finish logging in.`;
   }
 
+  // Hidden owner/mod command: !givedex @user gives that trainer the complete Pokédex and every shiny
+  if (cmd === 'givedex') {
+    if (!isMod) return null; // silently ignore everyone except the owner and moderators
+    const who = (args[0] || '').toLowerCase().replace('@', '').trim();
+    if (!who) return `@${user} Usage: !givedex @username`;
+    if (!db.users[who]) db.users[who] = { inventory: [], totalCaught: 0, pokedex: [] };
+    const tu = db.users[who];
+    const all = Array.from({ length: MAX_POKEMON_ID }, (_, i) => i + 1);
+    tu.pokedex = all.slice();
+    tu.shinies = all.slice();
+    if (!tu.dexDates || typeof tu.dexDates !== 'object') tu.dexDates = {};
+    if (!tu.shinyDates || typeof tu.shinyDates !== 'object') tu.shinyDates = {};
+    const nowTs = Date.now();
+    for (const id of all) {
+      if (!tu.dexDates[id]) tu.dexDates[id] = nowTs;
+      if (!tu.shinyDates[id]) tu.shinyDates[id] = nowTs;
+    }
+    await saveDB(db);
+    return `✅ @${who} now has the complete Pokédex and all ${MAX_POKEMON_ID} shinies!`;
+  }
+
   if (cmd === 'shinyspawn') {
     if (!isMod) return null; // silently ignore everyone except the owner and moderators
     const live = db.activeSpawn;
@@ -1808,7 +1829,7 @@ app.post('/kick-webhook', async (req, res) => {
     const cmd = parts[0];
     const args = parts.slice(1).join(' ');
 
-    const validCmds = ['spawn', 'shinyspawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
+    const validCmds = ['spawn', 'shinyspawn', 'givedex', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
     unlock = await lockDB();
