@@ -3748,7 +3748,7 @@ const PAGE = `<!DOCTYPE html>
         '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">🤖</span> !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade.' : '' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
-        '<div class="col-title">PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
+        '<div class="col-title">' + (isFeatured ? '🤖@' + esc(u.name) + ' ' : '') + 'PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
         '<div class="body">' +
           '<div class="col-dex"><div class="col-title">POKÉDEX</div><div class="grid">' + cells + '</div></div>' +
           '<div class="col-shiny"><div class="col-title">✨ SHINIES CAUGHT</div><div class="shinybox">' + shinyHtml + '</div></div>' +
