@@ -141,7 +141,7 @@ function lockDB() {
 
 const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
 const MAX_INVENTORY = 50;
-const FUSKAS_MAX_INVENTORY = 100; // the example trainer @fuskas has a bigger party
+const FUSKAS_MAX_INVENTORY = 200; // the example trainer @fuskas has a bigger party
 const maxPartyFor = (name) => (name === 'fuskas' ? FUSKAS_MAX_INVENTORY : MAX_INVENTORY);
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
@@ -2713,7 +2713,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
               name,
               totalCaught: u.totalCaught !== undefined ? u.totalCaught : inv.length,
               battleWins: u.battleWins || 0,
-              maxParty: name === 'fuskas' ? 100 : MAX_INVENTORY,
+              maxParty: maxPartyFor(name),
               pokedex: dex.slice().sort((a, b) => a - b),
               dexDates: (u.dexDates && typeof u.dexDates === 'object') ? u.dexDates : {},
               shinyDates: (u.shinyDates && typeof u.shinyDates === 'object') ? u.shinyDates : {},
