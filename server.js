@@ -29,22 +29,67 @@ const StateSchema = new mongoose.Schema({
 
 const GameState = mongoose.model('GameState', StateSchema);
 
+// The game state lives in memory (one bot instance) so commands never wait for the database. Changes are written to
+// MongoDB right after, in the background ("write-behind"), one write at a time. A shutdown flushes any pending change.
+let cachedDoc = null;
+let loadingDoc = null;
+let dirty = false;
+let flushTimer = null;
+let flushing = Promise.resolve();
+const FLUSH_DELAY_MS = 250;
+
 async function getDB() {
-  let doc = await GameState.findById('main');
-  if (!doc) doc = await GameState.create({ _id: 'main' });
-  return doc;
+  if (cachedDoc) return cachedDoc;
+  if (!loadingDoc) {
+    loadingDoc = (async () => {
+      let doc = await GameState.findById('main');
+      if (!doc) doc = await GameState.create({ _id: 'main' });
+      cachedDoc = doc;
+      return doc;
+    })().finally(() => { loadingDoc = null; });
+  }
+  return loadingDoc;
+}
+
+function flushDB() {
+  flushing = flushing.then(async () => {
+    while (dirty && cachedDoc) {
+      dirty = false;
+      const doc = cachedDoc;
+      doc.markModified('users');
+      doc.markModified('activeSpawn');
+      doc.markModified('pendingTrades');
+      doc.markModified('activeBattles');
+      doc.markModified('kickAuth');
+      doc.markModified('lastBattleResult');
+      doc.markModified('webSessions');
+      try {
+        await doc.save();
+      } catch (err) {
+        dirty = true; // try again on the next round
+        console.error('❌ Could not save game state:', err.message);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  });
+  return flushing;
 }
 
 async function saveDB(doc) {
-  doc.markModified('users');
-  doc.markModified('activeSpawn');
-  doc.markModified('pendingTrades');
-  doc.markModified('activeBattles');
-  doc.markModified('kickAuth');
-  doc.markModified('lastBattleResult');
-  doc.markModified('webSessions');
-  await doc.save();
+  dirty = true;
+  if (!flushTimer) {
+    flushTimer = setTimeout(() => { flushTimer = null; flushDB(); }, FLUSH_DELAY_MS);
+  }
 }
+
+async function flushAndExit(signal) {
+  console.log(`${signal}: saving game state before shutdown...`);
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  try { await flushDB(); } catch (e) {}
+  process.exit(0);
+}
+process.on('SIGTERM', () => flushAndExit('SIGTERM'));
+process.on('SIGINT', () => flushAndExit('SIGINT'));
 
 // All load -> change -> save cycles on the game state run one at a time. Without this, two commands
 // arriving together (e.g. two !catch) both load the same state and the last save erases the other's changes.
@@ -115,7 +160,7 @@ async function getKickAccessToken(db) {
 
 // Bot messages go out one at a time with a short pause between them, so replies to commands that arrive
 // at the same moment (e.g. many users typing !catch together) never overlap in chat.
-const CHAT_GAP_MS = 300;
+const CHAT_GAP_MS = 200;
 let chatChain = Promise.resolve();
 let lastChatSentAt = 0;
 
