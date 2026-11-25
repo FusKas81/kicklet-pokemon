@@ -3003,10 +3003,10 @@ const PAGE = `<!DOCTYPE html>
   @keyframes cardflash { 0%, 40% { border-color:var(--gold); box-shadow:0 0 24px rgba(248,192,48,.7); } 100% { border-color:var(--line); box-shadow:none; } }
   .tname { font-size:11px; word-break:break-all; }
   .tname.feat { word-break:normal; line-height:1.7; }
-  .tname .nm.g1, .tname .nm.g2, .tname .nm.g3 { background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; animation:nameShine 2.6s linear infinite; }
-  .tname .nm.g1 { background-image:linear-gradient(110deg,#b8860b 20%,#ffd700 35%,#fffbd0 50%,#ffd700 65%,#b8860b 80%); filter:drop-shadow(0 0 4px rgba(255,215,0,.55)); }
-  .tname .nm.g2 { background-image:linear-gradient(110deg,#7d838c 20%,#d1d5db 35%,#ffffff 50%,#d1d5db 65%,#7d838c 80%); filter:drop-shadow(0 0 4px rgba(220,225,235,.5)); }
-  .tname .nm.g3 { background-image:linear-gradient(110deg,#8a5524 20%,#cd7f32 35%,#f6c08a 50%,#cd7f32 65%,#8a5524 80%); filter:drop-shadow(0 0 4px rgba(205,127,50,.5)); }
+  .tname .nm.g1, .tname .nm.g2, .tname .nm.g3 { display:inline-block; max-width:100%; padding:2px 3px; margin:-2px -3px; background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; animation:nameShine 2.6s linear infinite; }
+  .tname .nm.g1 { background-image:linear-gradient(110deg,#d9a406 20%,#ffe14d 35%,#fffbd0 50%,#ffe14d 65%,#d9a406 80%); filter:drop-shadow(0 0 3px rgba(255,215,0,.35)); }
+  .tname .nm.g2 { background-image:linear-gradient(110deg,#aab1bc 20%,#dfe3ea 35%,#ffffff 50%,#dfe3ea 65%,#aab1bc 80%); filter:drop-shadow(0 0 3px rgba(220,225,235,.35)); }
+  .tname .nm.g3 { background-image:linear-gradient(110deg,#c27a38 20%,#e39a55 35%,#ffd2a1 50%,#e39a55 65%,#c27a38 80%); filter:drop-shadow(0 0 3px rgba(205,127,50,.35)); }
   @keyframes nameShine { 0% { background-position:150% 0; } 100% { background-position:-150% 0; } }
   @media (prefers-reduced-motion: reduce) { .tname .nm { animation:none !important; } }
   .rank { color:var(--gold); }
