@@ -62,7 +62,7 @@ const MAX_INVENTORY = 50;
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
-const CATCH_WINDOW_MS = 120 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
+const CATCH_WINDOW_MS = 160 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
@@ -108,23 +108,37 @@ async function getKickAccessToken(db) {
   return db.kickAuth.access_token;
 }
 
-async function sendKickChat(db, content) {
-  try {
-    const token = await getKickAccessToken(db);
-    if (!token || !process.env.KICK_BROADCASTER_ID) return;
+// Bot messages go out one at a time with a short pause between them, so replies to commands that arrive
+// at the same moment (e.g. many users typing !catch together) never overlap in chat.
+const CHAT_GAP_MS = 500;
+let chatChain = Promise.resolve();
+let lastChatSentAt = 0;
 
-    await axios.post(
-      'https://api.kick.com/public/v1/chat',
-      {
-        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
-        content: content.slice(0, 500),
-        type: 'user'
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-  } catch (err) {
-    console.error('❌ Kick Chat Error:', err.response?.data || err.message);
-  }
+function sendKickChat(db, content) {
+  const job = chatChain.then(async () => {
+    const wait = lastChatSentAt + CHAT_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    try {
+      const token = await getKickAccessToken(db);
+      if (!token || !process.env.KICK_BROADCASTER_ID) return;
+
+      await axios.post(
+        'https://api.kick.com/public/v1/chat',
+        {
+          broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
+          content: content.slice(0, 500),
+          type: 'user'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.error('❌ Kick Chat Error:', err.response?.data || err.message);
+    } finally {
+      lastChatSentAt = Date.now();
+    }
+  });
+  chatChain = job.catch(() => {});
+  return job;
 }
 
 async function subscribeKickChatWebhook(token) {
@@ -1431,6 +1445,27 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     return `✅ @${user} verified! Go back to the website to finish logging in.`;
   }
 
+  // Hidden owner/mod command: !givedex @user gives that trainer the complete Pokédex and every shiny
+  if (cmd === 'givedex') {
+    if (!isMod) return null; // silently ignore everyone except the owner and moderators
+    const who = (args[0] || '').toLowerCase().replace('@', '').trim();
+    if (!who) return `@${user} Usage: !givedex @username`;
+    if (!db.users[who]) db.users[who] = { inventory: [], totalCaught: 0, pokedex: [] };
+    const tu = db.users[who];
+    const all = Array.from({ length: MAX_POKEMON_ID }, (_, i) => i + 1);
+    tu.pokedex = all.slice();
+    tu.shinies = all.slice();
+    if (!tu.dexDates || typeof tu.dexDates !== 'object') tu.dexDates = {};
+    if (!tu.shinyDates || typeof tu.shinyDates !== 'object') tu.shinyDates = {};
+    const nowTs = Date.now();
+    for (const id of all) {
+      if (!tu.dexDates[id]) tu.dexDates[id] = nowTs;
+      if (!tu.shinyDates[id]) tu.shinyDates[id] = nowTs;
+    }
+    await saveDB(db);
+    return `✅ @${who} now has the complete Pokédex and all ${MAX_POKEMON_ID} shinies!`;
+  }
+
   if (cmd === 'shinyspawn') {
     if (!isMod) return null; // silently ignore everyone except the owner and moderators
     const live = db.activeSpawn;
@@ -1808,7 +1843,7 @@ app.post('/kick-webhook', async (req, res) => {
     const cmd = parts[0];
     const args = parts.slice(1).join(' ');
 
-    const validCmds = ['spawn', 'shinyspawn', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
+    const validCmds = ['spawn', 'shinyspawn', 'givedex', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
     unlock = await lockDB();
@@ -2273,7 +2308,7 @@ app.get('/overlay', (req, res) => {
       var txt = $('spawn-timer');
       var bar = $('spawn-bar');
       if (!lastSpawn) return;
-      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 120000);
+      var expires = lastSpawn.expiresAt || (lastSpawn.spawnedAt + 160000);
       var total = Math.max(1, expires - lastSpawn.spawnedAt);
       var left = Math.max(0, expires - serverNow());
       var secs = Math.ceil(left / 1000);
@@ -2346,7 +2381,7 @@ app.get('/overlay', (req, res) => {
 
         // spawned Pokémon (centre of the screen)
         var s = data.spawn;
-        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 120000))) {
+        if (s && s.spawnedAt && serverNow() < (s.expiresAt || (s.spawnedAt + 160000))) {
           lastSpawn = s;
           card.style.display = 'block';
           var banner = $('spawn-banner');
@@ -3184,7 +3219,7 @@ const PAGE = `<!DOCTYPE html>
   // ---------- chat commands list ----------
   var COMMANDS = [
     { n: '!catch', s: 'Throw a Pokéball at the wild Pokémon',
-      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 120 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
+      what: 'Tries to catch the wild Pokémon that is on screen right now. You have 160 seconds after it appears. Each trainer gets 3 tries per spawn and every try has a 65% chance to work. You cannot catch if your party is full (50). Catching 3 of the same species merges them into its evolution.',
       use: '!catch', ex: '!catch' },
     { n: '!spawncheck / !wild', s: 'See the wild Pokémon right now',
       what: 'Shows the Pokémon that is currently available, its type, how many catch tries you have left and how many seconds remain. If nothing is there it tells you when the next one appears.',
