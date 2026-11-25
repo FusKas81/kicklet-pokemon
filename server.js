@@ -3419,7 +3419,7 @@ const PAGE = `<!DOCTYPE html>
     var el = $('featured');
     if (!u) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'block';
-    el.innerHTML = '<h2><span>⭐ FEATURED TRAINER</span></h2>' + cardHtml(u);
+    el.innerHTML = '<h2><span>⭐ SEE ALL POKÉDEX HERE</span></h2>' + cardHtml(u);
   }
 
   function renderTrainers() {
@@ -3461,7 +3461,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' (Example of all Pokédex)' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
+        '<div class="tname">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' EXAMPLE TRAINER (not counted for stats)' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + data.maxParty + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + data.maxParty + ')</div><div class="party">' + partyHtml + '</div>' +
