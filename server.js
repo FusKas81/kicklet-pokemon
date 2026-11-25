@@ -164,7 +164,13 @@ const CHAT_GAP_MS = 200;
 let chatChain = Promise.resolve();
 let lastChatSentAt = 0;
 
+// Every time @fuskas is named in a bot message (he used a command, or someone mentions him), a 🤖 goes right after the name
+function addBotEmote(text) {
+  return String(text).replace(/@fuskas('s)?(?![A-Za-z0-9_])(?!\s*🤖)/gi, '@fuskas$1 🤖');
+}
+
 function sendKickChat(db, content, preToken = null) {
+  content = addBotEmote(content);
   const job = chatChain.then(async () => {
     const wait = lastChatSentAt + CHAT_GAP_MS - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -1701,7 +1707,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       // @fuskas accepts every offer; the trainer who offered then picks which of its Pokémon they want with !accept <slot>
       db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name, autoAccepted: true };
       await saveDB(db);
-      return `🔄 @${user} offered ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! 🤖 @${target} accepted automatically! @${user}, check @${target}'s party on the site ➡️ ${POKEDEX_SITE} and type !accept <slot> with the slot of the Pokémon you want to receive (slot 1 is untradable).`;
+      return `🔄 @${user} offered ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! @${target} accepted automatically! @${user}, check @${target}'s party on the site ➡️ ${POKEDEX_SITE} and type !accept <slot> with the slot of the Pokémon you want to receive (slot 1 is untradable).`;
     }
     db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
     await saveDB(db);
@@ -1827,7 +1833,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       autoPickForBot(nb);
       nb.lastLog = `Round 1: choose your moves!`;
       await saveDB(db);
-      return `🤖 @${opponent} accepted @${user}'s challenge automatically! 🔥 Battle started! ${nb.p1Mon.name} (@${nb.p1}) vs ${nb.p2Mon.name} (@${nb.p2}), both Lv${G2_LEVEL}! ${BATTLE_RULES} Round 1: @${user} use !move <1-4> now!`;
+      return `@${opponent} accepted @${user}'s challenge automatically! 🔥 Battle started! ${nb.p1Mon.name} (@${nb.p1}) vs ${nb.p2Mon.name} (@${nb.p2}), both Lv${G2_LEVEL}! ${BATTLE_RULES} Round 1: @${user} use !move <1-4> now!`;
     }
     await saveDB(db);
     return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, you have 5 minutes to accept with !battle @${user} <slot> or the challenge will be canceled. ${BATTLE_RULES}`;
@@ -2554,7 +2560,7 @@ setInterval(async () => {
           let len = 0;
           for (const u of catchers) {
             const piece = (out.length ? ', ' : '') + '@' + u;
-            if (fledHead.length + len + piece.length + reserve + fledTail.length > 500) break;
+            if (fledHead.length + len + piece.length + reserve + fledTail.length > 490) break; // a little room for the 🤖 that follows @fuskas
             out.push('@' + u);
             len += piece.length;
           }
@@ -3641,7 +3647,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto Battle or Trade, mouse over Pokemon in party to trade!' : '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle / Trade. Mouse Over Pokemon in Party to Trade!' : '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
