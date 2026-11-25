@@ -219,9 +219,9 @@ const CHAT_GAP_MS = 200;
 let chatChain = Promise.resolve();
 let lastChatSentAt = 0;
 
-// Every time @fuskas is named in a bot message (he used a command, or someone mentions him), a 🤖 goes right after the name
+// Every time @fuskas is named in a bot message (he used a command, or someone mentions him), a 🤖 goes right before the name
 function addBotEmote(text) {
-  return String(text).replace(/@fuskas('s)?(?![A-Za-z0-9_])(?!\s*🤖)/gi, '@fuskas$1 🤖');
+  return String(text).replace(/(?<!🤖)@fuskas('s)?(?![A-Za-z0-9_])/gi, '🤖@fuskas$1');
 }
 
 function sendKickChat(db, content, preToken = null) {
@@ -3745,7 +3745,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">🤖</span> @' + esc(u.name) + ' !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade.' : '' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">🤖</span> !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade.' : '' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
@@ -3865,7 +3865,7 @@ const PAGE = `<!DOCTYPE html>
     }
     if (s.tradeOut && s.tradeOut.auto) {
       h += '<div class="pl-note"><b>🔄 @' + esc(s.tradeOut.to) + ' ACCEPTED YOUR OFFER OF ' + esc(pretty(s.tradeOut.name)) + '</b>' +
-        '<label>LOOK AT 🤖 @fuskas PARTY AND TYPE THE SLOT NUMBER OF THE POKÉMON YOU WANT TO TRADE (SLOT 1 IS UNTRADABLE)</label><input id="po-slot" type="number" min="2" placeholder="slot number">' +
+        '<label>LOOK AT 🤖@fuskas PARTY AND TYPE THE SLOT NUMBER OF THE POKÉMON YOU WANT TO TRADE (SLOT 1 IS UNTRADABLE)</label><input id="po-slot" type="number" min="2" placeholder="slot number">' +
         '<div class="pl-row"><button class="btn yes" data-act="accept-auto">GET THIS POKÉMON</button><button class="btn no" data-act="cancel-trade">CANCEL OFFER</button></div></div>';
     } else if (s.tradeOut) {
       h += '<div class="pl-note"><b>🔄 YOU OFFERED ' + esc(pretty(s.tradeOut.name)) + ' TO @' + esc(s.tradeOut.to) + '</b>. Waiting for them to accept.' +
