@@ -1087,6 +1087,21 @@ function g2NeedsPick(B, side) {
   return g2Usable(B[side + 'Mon']).length > 0; // none usable -> automatic Struggle
 }
 
+// @fuskas is a bot-controlled example trainer: it accepts battle challenges and trade offers on its own.
+const AUTO_TRAINER = 'fuskas';
+const AUTO_BATTLE_SLOT = 1;   // party slot that always fights (and can never be traded)
+const AUTO_MOVE = 4;          // move it always picks
+function autoPickForBot(B) {
+  for (const side of ['p1', 'p2']) {
+    if (B[side] !== AUTO_TRAINER || !B.pickState || B.pickState[side] !== 'wait') continue;
+    // always move 4; only if that is impossible (no PP / disabled / missing) fall back to the next usable move
+    const order = [AUTO_MOVE - 1, 0, 1, 2, 3].filter((v, i, a) => a.indexOf(v) === i);
+    for (const idx of order) {
+      if (g2Pick(B, side, idx).ok) break;
+    }
+  }
+}
+
 function g2StartRound(B) {
   B.round = (B.round || 0) + 1;
   B.picks = { p1: null, p2: null };
@@ -1326,7 +1341,7 @@ function concludeRounds(db, key, battle) {
     g2ResolveRound(battle);
     lines.push(...(battle.lastLines || []));
     battle.seq = (battle.seq || 0) + 1;
-    if (!battle.ended) g2StartRound(battle);
+    if (!battle.ended) { g2StartRound(battle); autoPickForBot(battle); }
   }
   battle.roundLines = lines.slice(-14);
   const text = lines.join(' ');
@@ -1631,12 +1646,29 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       return `@${user} Pick which Pokémon to offer: !trade @${target} <slot>, e.g. !trade @${target} 1. Type !party to see your slots (1-${db.users[user].inventory.length}).`;
     }
 
+    if (target === AUTO_TRAINER) {
+      // @fuskas accepts every offer; the trainer who offered then picks which of its Pokémon they want with !accept <slot>
+      db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name, autoAccepted: true };
+      await saveDB(db);
+      return `🔄 @${user} offered ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! 🤖 @${target} accepted automatically! @${user}, check @${target}'s party on the site ➡️ ${POKEDEX_SITE} and type !accept <slot> with the slot of the Pokémon you want to receive (slot 1 is untradable).`;
+    }
     db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
     await saveDB(db);
     return `🔄 @${user} wants to trade ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! Type !accept <yourSlot> to accept.`;
   }
 
   if (cmd === 'accept') {
+    // the trainer who offered a trade to @fuskas picks which of its Pokémon they get
+    const autoKey = Object.keys(db.pendingTrades || {}).find(k => db.pendingTrades[k] && db.pendingTrades[k].autoAccepted && db.pendingTrades[k].fromUser === user);
+    if (autoKey && !db.pendingTrades[user]) {
+      const botInv = (db.users[autoKey] && db.users[autoKey].inventory) || [];
+      const pick = parseInt(args[0]);
+      if (pick === 1) return `@${user} @${autoKey}'s party slot 1 is untradable! Pick another slot (2-${botInv.length}) with !accept <slot>. Check the party on the site ➡️ ${POKEDEX_SITE}`;
+      if (args.length === 0 || Number.isNaN(pick) || pick < 2 || pick > botInv.length) {
+        return `@${user} @${autoKey} accepted your offer of ${db.pendingTrades[autoKey].offeredName}! Check @${autoKey}'s party on the site ➡️ ${POKEDEX_SITE} and type !accept <slot> (2-${botInv.length}, slot 1 is untradable) for the Pokémon you want to receive.`;
+      }
+      return await processCommand(db, autoKey, 'accept', String(pick), true, false);
+    }
     const trade = db.pendingTrades[user];
     if (!trade) return `@${user} No pending trades. When someone offers you a trade with !trade @${user} <slot>, reply with !accept <your slot> to swap Pokémon.`;
     const mySlot = parseInt(args[0]) - 1;
@@ -1719,6 +1751,9 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     }
     if (findBattleKey(db, opponent)) return `@${user} @${opponent} is already busy with another battle or challenge. Try again later!`;
 
+    const botMon = opponent === AUTO_TRAINER ? (db.users[AUTO_TRAINER].inventory || [])[AUTO_BATTLE_SLOT - 1] : null;
+    if (opponent === AUTO_TRAINER && !botMon) return `@${user} @${AUTO_TRAINER} doesn't have a Pokémon in party slot ${AUTO_BATTLE_SLOT} right now, so the challenge can't start.`;
+
     const battleKey = [user, opponent].sort().join('_vs_');
     db.activeBattles[battleKey] = {
       p1: user,
@@ -1730,6 +1765,19 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       startedAt: null,
       warned60: false
     };
+    if (botMon) {
+      // @fuskas accepts right away with the Pokémon in slot 3 and always uses move 4
+      const nb = db.activeBattles[battleKey];
+      nb.p2Mon = g2BattleMon(g2EnsureMon(botMon));
+      nb.startedAt = Date.now();
+      nb.seq = 0;
+      nb.roundLines = [];
+      g2StartRound(nb);
+      autoPickForBot(nb);
+      nb.lastLog = `Round 1: choose your moves!`;
+      await saveDB(db);
+      return `🤖 @${opponent} accepted @${user}'s challenge automatically! 🔥 Battle started! ${nb.p1Mon.name} (@${nb.p1}) vs ${nb.p2Mon.name} (@${nb.p2}), both Lv${G2_LEVEL}! ${BATTLE_RULES} Round 1: @${user} use !move <1-4> now!`;
+    }
     await saveDB(db);
     return `⚔️ @${user} challenged @${opponent} with ${myMon.name}! @${opponent}, you have 5 minutes to accept with !battle @${user} <slot> or the challenge will be canceled. ${BATTLE_RULES}`;
   }
@@ -2484,7 +2532,7 @@ setInterval(async () => {
 // API:     /api/pokedex        -> public JSON (no secrets, no internal uids)
 //          /api/login/start, /api/login/status, /api/me, /api/logout, /api/release
 
-function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
+function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runCommands, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto }) {
   const species = Object.entries(GEN2.mons)
     .map(([id, m]) => ({ id: Number(id), name: m.n, types: m.t }))
     .sort((a, b) => a.id - b.id);
@@ -2694,7 +2742,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMI
       let tradeIn = null, tradeOut = null;
       if (pt[user]) tradeIn = { from: pt[user].fromUser, name: pt[user].offeredName };
       for (const to of Object.keys(pt)) {
-        if (pt[to] && pt[to].fromUser === user) { tradeOut = { to, name: pt[to].offeredName }; break; }
+        if (pt[to] && pt[to].fromUser === user) { tradeOut = { to, name: pt[to].offeredName, auto: Boolean(pt[to].autoAccepted) }; break; }
       }
 
       let battle = null;
@@ -2756,6 +2804,15 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMI
         reply = await runCommand(user, 'move', String(mv));
       } else if (action === 'forfeit') {
         reply = await runCommand(user, 'forfeit', '');
+      } else if (action === 'fuskasTrade') {
+        // one-click trade with the example trainer: offer one of your Pokémon and pick which of its Pokémon you get
+        const mySlot = num(body.mySlot, 500);
+        const slot = num(body.slot, 500);
+        const botInv = (db0.users[AUTO_TRAINER] && db0.users[AUTO_TRAINER].inventory) || [];
+        if (!mySlot || !slot) return res.status(400).json({ error: 'Pick one of your Pokémon.' });
+        if (slot === 1) return res.status(400).json({ error: 'Untradable' });
+        if (slot > botInv.length) return res.status(400).json({ error: 'That Pokémon does not exist.' });
+        reply = await runCommands(user, [['trade', AUTO_TRAINER + ' ' + mySlot], ['accept', String(slot)]]);
       } else if (action === 'declineTrade' || action === 'cancelTrade') {
         const unlock = await lockDB();
         try {
@@ -2876,6 +2933,7 @@ const PAGE = `<!DOCTYPE html>
   .card.flash { animation:cardflash 1.6s ease-out; }
   @keyframes cardflash { 0%, 40% { border-color:var(--gold); box-shadow:0 0 24px rgba(248,192,48,.7); } 100% { border-color:var(--line); box-shadow:none; } }
   .tname { font-size:11px; word-break:break-all; }
+  .tname.feat { word-break:normal; line-height:1.7; }
   .rank { color:var(--gold); }
   .meta { font-size:8px; color:var(--mute); margin-top:6px; line-height:1.9; }
   .bar { height:10px; background:#0b0c12; border-radius:5px; overflow:hidden; margin:10px 0; border:2px solid #0b0c12; }
@@ -2921,7 +2979,7 @@ const PAGE = `<!DOCTYPE html>
   #play .si.none { color:var(--mute); cursor:default; }
   #play .pl-t { color:var(--gold); font-size:11px; margin-bottom:8px; }
   #play label { display:block; color:var(--mute); font-size:8px; margin:8px 0 4px; }
-  #play select, #play input { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
+  #modal select, #play select, #play input { width:100%; background:#0f101a; border:3px solid var(--line); color:var(--ink); font-family:inherit; font-size:9px; padding:9px; border-radius:6px; outline:none; }
   #play .pl-box .btn { margin-top:10px; width:100%; }
   #play .pl-note { background:var(--panel2); border:3px solid var(--gold); border-radius:10px; padding:12px 14px; font-size:9px; line-height:1.9; margin-bottom:10px; }
   #play .pl-note b { color:var(--gold); }
@@ -3161,6 +3219,10 @@ const PAGE = `<!DOCTYPE html>
     } else {
       mv = '<br><br><em>MOVES</em><br>Not known yet (shown after the trainer uses a command)';
     }
+    if (owner === FEATURED && me !== owner) {
+      if (slotNo === 0) return head + mv + '<br><br><b>Untradable</b>';
+      return head + mv + '<br><br>' + (me ? '<em>Click to trade</em>' : '<em>Log in to trade</em>');
+    }
     if (me && me === owner) return head + mv + '<br><br><em>Press this Pokémon to remove it from your party</em>';
     if (me) return head + mv;
     return head + mv + '<br><br>Log in (button below the leaderboards) to manage your party';
@@ -3212,8 +3274,57 @@ const PAGE = `<!DOCTYPE html>
     };
   }
 
+  async function tradeConfirm(el) {
+    var name = pretty(el.getAttribute('data-name'));
+    var shiny = el.getAttribute('data-shiny') === '1';
+    var slot = Number(el.getAttribute('data-slot')) + 1;
+    var party = (playState && playState.party) || null;
+    if (!party) {
+      try {
+        var r0 = await fetch('/api/play/state', { headers: { Authorization: 'Bearer ' + token } });
+        if (r0.ok) party = (await r0.json()).party;
+      } catch (e) {}
+    }
+    if (!party || !party.length) { toast('You need a Pokémon in your party to trade.'); return; }
+    openModal('<div class="mt">TRADE FOR THIS POKÉMON?</div>' +
+      '<img class="big" src="' + png(el.getAttribute('data-id'), shiny) + '" alt="">' +
+      '<div>' + (shiny ? '✨ ' : '') + esc(name) + ' Lv' + esc(el.getAttribute('data-level')) + ' (@' + esc(el.getAttribute('data-user')) + ' slot ' + slot + ')</div>' +
+      '<label style="display:block;margin:10px 0 4px">PICK THE POKÉMON YOU GIVE</label><select id="tf-mon">' + partyOptions(party) + '</select>' +
+      '<div class="err" id="tf-err"></div>' +
+      '<div class="mb"><button class="btn yes" id="tf-yes">TRADE</button><button class="btn no" id="tf-no">CANCEL</button></div>');
+    $('tf-no').onclick = closeModal;
+    $('tf-yes').onclick = async function () {
+      $('tf-yes').disabled = true; $('tf-no').disabled = true;
+      try {
+        var r = await fetch('/api/play/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ action: 'fuskasTrade', mySlot: $('tf-mon').value, slot: slot })
+        });
+        var j = await r.json();
+        if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); openLogin('Your login expired. Please log in again.'); return; }
+        if (!r.ok) { $('tf-err').textContent = j.error || 'Something went wrong.'; $('tf-yes').disabled = false; $('tf-no').disabled = false; return; }
+        closeModal();
+        toast(j.message || 'Done.');
+        playStatusSig = '';
+        lastJson = '';
+        pollPlay();
+        load();
+      } catch (e) {
+        $('tf-err').textContent = 'Could not reach the server.';
+        $('tf-yes').disabled = false; $('tf-no').disabled = false;
+      }
+    };
+  }
+
   function clickMon(el) {
     var owner = el.getAttribute('data-user');
+    if (owner === FEATURED && me !== owner) {
+      if (!me) { openLogin('Log in to trade with @' + owner + '. Type your Kick username and confirm it in the stream chat.'); return; }
+      if (Number(el.getAttribute('data-slot')) === 0) { toast('Untradable'); return; }
+      tradeConfirm(el);
+      return;
+    }
     if (!me) { openLogin('Log in to manage your party. Type your Kick username and confirm it in the stream chat.'); return; }
     if (me !== owner) { toast('That Pokémon belongs to @' + owner + '. Only its trainer can release it.'); return; }
     releaseConfirm(el);
@@ -3461,7 +3572,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' EXAMPLE TRAINER (not counted for stats)' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto Battle or Trade, mouse over Pokemon in party to trade!' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + data.maxParty + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + data.maxParty + ')</div><div class="party">' + partyHtml + '</div>' +
@@ -3579,7 +3690,11 @@ const PAGE = `<!DOCTYPE html>
         '<label>PICK THE POKÉMON YOU GIVE IN RETURN</label><select id="pi-mon">' + partyOptions(s.party) + '</select>' +
         '<div class="pl-row"><button class="btn yes" data-act="accept-trade">ACCEPT TRADE</button><button class="btn no" data-act="decline-trade">DECLINE</button></div></div>';
     }
-    if (s.tradeOut) {
+    if (s.tradeOut && s.tradeOut.auto) {
+      h += '<div class="pl-note"><b>🔄 @' + esc(s.tradeOut.to) + ' ACCEPTED YOUR OFFER OF ' + esc(pretty(s.tradeOut.name)) + '</b>' +
+        '<label>LOOK AT THE PARTY ABOVE (SEE ALL POKÉDEX HERE) AND TYPE THE SLOT NUMBER OF THE POKÉMON YOU WANT (SLOT 1 IS UNTRADABLE)</label><input id="po-slot" type="number" min="2" placeholder="slot number">' +
+        '<div class="pl-row"><button class="btn yes" data-act="accept-auto">GET THIS POKÉMON</button><button class="btn no" data-act="cancel-trade">CANCEL OFFER</button></div></div>';
+    } else if (s.tradeOut) {
       h += '<div class="pl-note"><b>🔄 YOU OFFERED ' + esc(pretty(s.tradeOut.name)) + ' TO @' + esc(s.tradeOut.to) + '</b>. Waiting for them to accept.' +
         '<div class="pl-row"><button class="btn no" data-act="cancel-trade">CANCEL OFFER</button></div></div>';
     }
@@ -3669,6 +3784,9 @@ const PAGE = `<!DOCTYPE html>
       playAct({ action: 'battle', opponent: playState.battle.opponent, slot: val('pa-mon') }, el);
     } else if (act === 'accept-trade') {
       playAct({ action: 'accept', slot: val('pi-mon') }, el);
+    } else if (act === 'accept-auto') {
+      if (!val('po-slot')) { toast('Type the slot number of the Pokémon you want.'); return; }
+      playAct({ action: 'accept', slot: val('po-slot') }, el);
     } else if (act === 'decline-trade') {
       playAct({ action: 'declineTrade' }, el);
     } else if (act === 'cancel-trade') {
@@ -3706,7 +3824,29 @@ async function runCommand(user, cmd, args) {
   }
 }
 
-registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto });
+// Several commands for one trainer in a single step; only the last reply is posted to chat.
+async function runCommands(user, steps) {
+  const unlock = await lockDB();
+  try {
+    const db = await getDB();
+    let reply = null;
+    for (const [cmd, args] of steps) {
+      reply = await processCommand(db, user, cmd, args, false, false);
+      if (cmd === 'trade') {
+        const pt = db.pendingTrades[AUTO_TRAINER];
+        if (!(pt && pt.fromUser === user && pt.autoAccepted)) break; // the offer was refused, show why
+      }
+    }
+    if (reply) {
+      try { await sendKickChat(db, reply); } catch (e) { console.error('❌ Could not post website command to chat:', e.message); }
+    }
+    return reply;
+  } finally {
+    unlock();
+  }
+}
+
+registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runCommands, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
