@@ -1727,6 +1727,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       return `@${user} To release a Pokémon, type !release <slot number>, e.g. !release 3 releases the Pokémon in slot 3. Type !party to see your slots (1-${inv.length}).${siteNote}`;
     }
     if (!inv[slot]) return `@${user} You have no Pokémon in slot ${slot + 1}. Pick a slot from 1-${inv.length} (check !party), e.g. !release 1.`;
+    if (user === AUTO_TRAINER && slot === AUTO_BATTLE_SLOT - 1) return `@${user} Slot ${AUTO_BATTLE_SLOT} is blocked, it can't be released!`;
     const released = inv.splice(slot, 1)[0];
     await saveDB(db);
     return `@${user} Released ${released.name}.`;
@@ -2860,6 +2861,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
           inv[i].id !== Number(body.id) || Boolean(inv[i].isShiny) !== Boolean(body.shiny)) {
         return res.status(409).json({ error: 'Your party changed. Refresh the page and try again.' });
       }
+      if (user === AUTO_TRAINER && i === AUTO_BATTLE_SLOT - 1) return res.status(403).json({ error: 'Slot 1 is blocked, it can\'t be released!' });
       const gone = inv.splice(i, 1)[0];
       await saveDB(db);
       cache = { at: 0, data: null };
@@ -3392,6 +3394,7 @@ const PAGE = `<!DOCTYPE html>
       if (slotNo === 0) return head + mv + '<br><br><b>Untradable</b>';
       return head + mv + '<br><br>' + (me ? '<em>Click to trade</em>' : '<em>Log in to trade</em>');
     }
+    if (me && me === owner && owner === FEATURED && slotNo === 0) return head + mv + '<br><br><b>Slot 1 is blocked, it cannot be released!</b>';
     if (me && me === owner) return head + mv + '<br><br><em>Press this Pokémon to remove it from your party</em>';
     if (me) return head + mv;
     return head + mv + '<br><br>Log in (button below the leaderboards) to manage your party';
@@ -3496,6 +3499,7 @@ const PAGE = `<!DOCTYPE html>
     }
     if (!me) { openLogin('Log in to manage your party. Type your Kick username and confirm it in the stream chat.'); return; }
     if (me !== owner) { toast('That Pokémon belongs to @' + owner + '. Only its trainer can release it.'); return; }
+    if (owner === FEATURED && Number(el.getAttribute('data-slot')) === 0) { toast('Slot 1 is blocked, it cannot be released!'); return; }
     releaseConfirm(el);
   }
 
@@ -3699,7 +3703,7 @@ const PAGE = `<!DOCTYPE html>
     var el = $('featured');
     if (!u) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'block';
-    el.innerHTML = '<h2><span>⭐ SEE ALL POKÉDEX HERE</span></h2>' + cardHtml(u);
+    el.innerHTML = '<h2><span>⭐ SEE ALL POKÉDEX HERE AND TRADE BY CLICKING POKEMON IN @fuskas PARTY</span></h2>' + cardHtml(u);
   }
 
   function renderTrainers() {
@@ -3861,7 +3865,7 @@ const PAGE = `<!DOCTYPE html>
     }
     if (s.tradeOut && s.tradeOut.auto) {
       h += '<div class="pl-note"><b>🔄 @' + esc(s.tradeOut.to) + ' ACCEPTED YOUR OFFER OF ' + esc(pretty(s.tradeOut.name)) + '</b>' +
-        '<label>LOOK AT THE PARTY ABOVE (SEE ALL POKÉDEX HERE) AND TYPE THE SLOT NUMBER OF THE POKÉMON YOU WANT (SLOT 1 IS UNTRADABLE)</label><input id="po-slot" type="number" min="2" placeholder="slot number">' +
+        '<label>LOOK AT 🤖 @fuskas PARTY AND TYPE THE SLOT NUMBER OF THE POKÉMON YOU WANT TO TRADE (SLOT 1 IS UNTRADABLE)</label><input id="po-slot" type="number" min="2" placeholder="slot number">' +
         '<div class="pl-row"><button class="btn yes" data-act="accept-auto">GET THIS POKÉMON</button><button class="btn no" data-act="cancel-trade">CANCEL OFFER</button></div></div>';
     } else if (s.tradeOut) {
       h += '<div class="pl-note"><b>🔄 YOU OFFERED ' + esc(pretty(s.tradeOut.name)) + ' TO @' + esc(s.tradeOut.to) + '</b>. Waiting for them to accept.' +
