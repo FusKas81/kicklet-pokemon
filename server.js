@@ -1506,7 +1506,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     // Each trainer gets MAX_CATCH_TRIES attempts per spawn
     if (!spawn.attempts) spawn.attempts = {};
     const used = spawn.attempts[user] || 0;
-    if (used >= MAX_CATCH_TRIES) return `@${user} You're out of tries for this ${spawn.name}! Wait for the next spawn. [emote:4148128:mericCat]`;
+    if (used >= MAX_CATCH_TRIES) return `@${user} You're out of tries for this ${spawn.name}! Wait for the next spawn. [emote:4148128:mericCat] Next spawn in ${nextSpawnText(db, spawn)}!`;
 
     spawn.attempts[user] = used + 1;
     if (Math.random() > 0.65) {
@@ -1514,7 +1514,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       const left = MAX_CATCH_TRIES - spawn.attempts[user];
       return left > 0
         ? `@${user} The wild ${spawn.name} broke free! You have ${left} ${left === 1 ? 'try' : 'tries'} left (${spawn.attempts[user]}/${MAX_CATCH_TRIES} used).${left === 1 ? ' [emote:5273247:highCortisol]' : ''}`
-        : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn. [emote:4148128:mericCat]`;
+        : `@${user} The wild ${spawn.name} broke free and you're out of tries (${MAX_CATCH_TRIES}/${MAX_CATCH_TRIES} used)! Better luck on the next spawn. [emote:4148128:mericCat] Next spawn in ${nextSpawnText(db, spawn)}!`;
     }
 
     const caughtMon = await generatePokemon(spawn.id, spawn.isShiny);
