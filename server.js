@@ -3007,8 +3007,16 @@ const PAGE = `<!DOCTYPE html>
   .tname .nm.g1 { background-image:linear-gradient(110deg,#d9a406 20%,#ffe14d 35%,#fffbd0 50%,#ffe14d 65%,#d9a406 80%); filter:drop-shadow(0 0 3px rgba(255,215,0,.35)); }
   .tname .nm.g2 { background-image:linear-gradient(110deg,#aab1bc 20%,#dfe3ea 35%,#ffffff 50%,#dfe3ea 65%,#aab1bc 80%); filter:drop-shadow(0 0 3px rgba(220,225,235,.35)); }
   .tname .nm.g3 { background-image:linear-gradient(110deg,#c27a38 20%,#e39a55 35%,#ffd2a1 50%,#e39a55 65%,#c27a38 80%); filter:drop-shadow(0 0 3px rgba(205,127,50,.35)); }
+  .tname .medal { display:inline-block; font-size:14px; line-height:1; vertical-align:-1px; }
+  .tname .medal.m1 { animation:medalShine 1.8s ease-in-out infinite; transform-origin:50% 60%; }
+  @keyframes medalShine {
+    0%, 100% { transform:scale(1) rotate(0deg); filter:drop-shadow(0 0 0 rgba(255,215,0,0)); }
+    25% { transform:scale(1.25) rotate(-12deg); filter:drop-shadow(0 0 6px rgba(255,215,0,.9)); }
+    50% { transform:scale(1.1) rotate(0deg); filter:drop-shadow(0 0 3px rgba(255,215,0,.6)); }
+    75% { transform:scale(1.25) rotate(12deg); filter:drop-shadow(0 0 6px rgba(255,215,0,.9)); }
+  }
   @keyframes nameShine { 0% { background-position:150% 0; } 100% { background-position:-150% 0; } }
-  @media (prefers-reduced-motion: reduce) { .tname .nm { animation:none !important; } }
+  @media (prefers-reduced-motion: reduce) { .tname .nm, .tname .medal { animation:none !important; } }
   .rank { color:var(--gold); }
   .meta { font-size:8px; color:var(--mute); margin-top:6px; line-height:1.9; }
   .bar { height:10px; background:#0b0c12; border-radius:5px; overflow:hidden; margin:10px 0; border:2px solid #0b0c12; }
@@ -3647,7 +3655,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade!' : '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade!' : '<span class="rank">#' + rank + '</span> ' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
