@@ -82,6 +82,14 @@ async function saveDB(doc) {
   }
 }
 
+// Resolves once everything changed so far is written to MongoDB (or after maxMs, so chat never hangs if the database is down).
+// Replies wait for this, so the bot never announces a catch that was not stored.
+function flushConfirmed(maxMs = 3000) {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  const done = dirty || flushTimer ? flushDB() : flushing;
+  return Promise.race([done, new Promise((r) => setTimeout(r, maxMs))]).catch(() => {});
+}
+
 async function flushAndExit(signal) {
   console.log(`${signal}: saving game state before shutdown...`);
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -1965,7 +1973,7 @@ app.post('/kick-webhook', async (req, res) => {
       // Queue the reply while still holding the lock (keeps replies in order), but don't wait for it to be sent:
       // the next command can be processed right away while the reply goes out through the spaced chat queue.
       const token = await getKickAccessToken(db).catch(() => null);
-      sendJob = sendKickChat(db, reply, token);
+      sendJob = flushConfirmed().then(() => sendKickChat(db, reply, token));
     }
   } catch (err) {
     console.error('❌ Webhook processing error:', err.message);
@@ -3008,7 +3016,9 @@ const PAGE = `<!DOCTYPE html>
   .tname .nm.g2 { background-image:linear-gradient(110deg,#aab1bc 20%,#dfe3ea 35%,#ffffff 50%,#dfe3ea 65%,#aab1bc 80%); filter:drop-shadow(0 0 3px rgba(220,225,235,.35)); }
   .tname .nm.g3 { background-image:linear-gradient(110deg,#c27a38 20%,#e39a55 35%,#ffd2a1 50%,#e39a55 65%,#c27a38 80%); filter:drop-shadow(0 0 3px rgba(205,127,50,.35)); }
   .tname .medal { display:inline-block; font-size:14px; line-height:1; vertical-align:-1px; }
-  .tname .medal.m1 { animation:medalShine 1.8s ease-in-out infinite; transform-origin:50% 60%; }
+  .tname .medal { animation:medalShine 1.8s ease-in-out infinite; transform-origin:50% 60%; }
+  .tname .medal.m2 { animation-delay:.3s; }
+  .tname .medal.m3 { animation-delay:.6s; }
   @keyframes medalShine {
     0%, 100% { transform:scale(1) rotate(0deg); filter:drop-shadow(0 0 0 rgba(255,215,0,0)); }
     25% { transform:scale(1.25) rotate(-12deg); filter:drop-shadow(0 0 6px rgba(255,215,0,.9)); }
