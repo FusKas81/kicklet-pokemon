@@ -1601,6 +1601,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'leaderboard') {
     const medals = ['🥇', '🥈', '🥉'];
     const top3 = (valueOf) => Object.entries(db.users)
+      .filter(([name]) => name !== 'fuskas') // featured trainer is not part of the leaderboards
       .map(([name, data]) => ({ name, n: valueOf(data) }))
       .filter(e => e.n > 0)
       .sort((x, y) => y.n - x.n)
@@ -2988,6 +2989,8 @@ const PAGE = `<!DOCTYPE html>
   <div id="play-status"></div>
 </section>
 
+<section id="featured" style="display:none"></section>
+
 <section>
   <h2><span>TRAINERS</span> <input id="search" placeholder="search trainer..."></h2>
   <div id="trainers"></div>
@@ -3292,18 +3295,20 @@ const PAGE = `<!DOCTYPE html>
       tip.style.left = Math.max(4, x) + 'px';
       tip.style.top = Math.max(4, y) + 'px';
     }
-    var box = $('trainers'), cmds = $('cmds');
-    box.addEventListener('mousemove', function (e) {
-      var dx = e.target.closest ? e.target.closest('[data-dex]') : null;
-      if (dx) { show(e, dexTipHtml(dx), false); return; }
-      var el = e.target.closest ? e.target.closest('.pm') : null;
-      if (!el) { hide(); return; }
-      show(e, tipHtml(el), false);
-    });
-    box.addEventListener('mouseleave', hide);
-    box.addEventListener('click', function (e) {
-      var el = e.target.closest ? e.target.closest('.pm') : null;
-      if (el) { hide(); clickMon(el); }
+    var cmds = $('cmds');
+    [$('trainers'), $('featured')].forEach(function (box) {
+      box.addEventListener('mousemove', function (e) {
+        var dx = e.target.closest ? e.target.closest('[data-dex]') : null;
+        if (dx) { show(e, dexTipHtml(dx), false); return; }
+        var el = e.target.closest ? e.target.closest('.pm') : null;
+        if (!el) { hide(); return; }
+        show(e, tipHtml(el), false);
+      });
+      box.addEventListener('mouseleave', hide);
+      box.addEventListener('click', function (e) {
+        var el = e.target.closest ? e.target.closest('.pm') : null;
+        if (el) { hide(); clickMon(el); }
+      });
     });
     cmds.addEventListener('mousemove', function (e) {
       var el = e.target.closest ? e.target.closest('.cmd') : null;
@@ -3381,10 +3386,12 @@ const PAGE = `<!DOCTYPE html>
     data.users.forEach(function (u) { prevBoards[elId][u.name] = valueOf(u); });
   }
 
+  var FEATURED = 'fuskas'; // always shown on top of the site, never listed in the leaderboards
+
   function renderLeaderboard() {
-    var byCatch = data.users.filter(function (u) { return u.totalCaught > 0; })
+    var byCatch = data.users.filter(function (u) { return u.name !== FEATURED && u.totalCaught > 0; })
       .sort(function (a, b) { return b.totalCaught - a.totalCaught || b.pokedex.length - a.pokedex.length; });
-    var byWins = data.users.filter(function (u) { return u.battleWins > 0; })
+    var byWins = data.users.filter(function (u) { return u.name !== FEATURED && u.battleWins > 0; })
       .sort(function (a, b) { return b.battleWins - a.battleWins || b.totalCaught - a.totalCaught; });
     renderBoard('lb', byCatch.slice(0, 10), function (u) { return u.totalCaught; });
     renderBoard('lb2', byWins.slice(0, 10), function (u) { return u.battleWins; });
@@ -3406,15 +3413,31 @@ const PAGE = `<!DOCTYPE html>
   }
 
   // ---------- trainers + pokédex grids ----------
+  function renderFeatured() {
+    var u = null;
+    for (var i = 0; i < data.users.length; i++) if (data.users[i].name === FEATURED) u = data.users[i];
+    var el = $('featured');
+    if (!u) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.innerHTML = '<h2><span>⭐ FEATURED TRAINER</span></h2>' + cardHtml(u);
+  }
+
   function renderTrainers() {
+    renderFeatured();
     var q = $('search').value.trim().toLowerCase();
-    var users = data.users.filter(function (u) { return !q || u.name.indexOf(q) !== -1; });
+    var others = data.users.filter(function (u) { return u.name !== FEATURED; });
+    var users = others.filter(function (u) { return !q || u.name.indexOf(q) !== -1; });
     // the logged-in trainer always goes first (other trainers keep their rank order)
     if (me) users = users.filter(function (u) { return u.name === me; }).concat(users.filter(function (u) { return u.name !== me; }));
-    if (!users.length) { $('trainers').innerHTML = '<div class="empty">' + (data.users.length ? 'NO TRAINER FOUND' : 'NOBODY HAS CAUGHT A POKÉMON YET!') + '</div>'; return; }
+    if (!users.length) { $('trainers').innerHTML = '<div class="empty">' + (others.length ? 'NO TRAINER FOUND' : 'NOBODY HAS CAUGHT A POKÉMON YET!') + '</div>'; return; }
 
-    $('trainers').innerHTML = users.map(function (u) {
-      var rank = data.users.indexOf(u) + 1;
+    $('trainers').innerHTML = users.map(cardHtml).join('');
+  }
+
+  function cardHtml(u) {
+    {
+      var isFeatured = u.name === FEATURED;
+      var rank = data.users.filter(function (x) { return x.name !== FEATURED; }).indexOf(u) + 1;
       var pct = Math.min(100, (u.pokedex.length / data.max) * 100);
       var dex = {}; u.pokedex.forEach(function (id) { dex[id] = 1; });
       var held = {}; u.party.forEach(function (p) { held[p.id] = 1; });
@@ -3438,7 +3461,7 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname"><span class="rank">#' + rank + '</span> @' + esc(u.name) + '</div>' +
+        '<div class="tname">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' (Example of all Pokédex)' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + data.maxParty + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
         '<div class="col-title">PARTY (' + u.party.length + '/' + data.maxParty + ')</div><div class="party">' + partyHtml + '</div>' +
@@ -3446,7 +3469,7 @@ const PAGE = `<!DOCTYPE html>
           '<div class="col-dex"><div class="col-title">POKÉDEX</div><div class="grid">' + cells + '</div></div>' +
           '<div class="col-shiny"><div class="col-title">✨ SHINIES CAUGHT</div><div class="shinybox">' + shinyHtml + '</div></div>' +
         '</div></div>';
-    }).join('');
+    }
   }
 
   // ---------- load ----------
