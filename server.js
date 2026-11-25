@@ -66,6 +66,9 @@ const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedul
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
 const CATCH_WINDOW_MS = 180 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
 
+// A !catch typed before the spawn ran out still counts even if the bot processes it a little later. To make that work, the
+// "fled" announcement and the next automatic spawn wait this long after the catch window closes.
+const FLEE_GRACE_MS = 5000;
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
 }
@@ -1441,7 +1444,7 @@ function nextSpawnText(db, spawn) {
   return `${Math.ceil(msLeft / 1000)}s`;
 }
 
-async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub = false) {
+async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub = false, msgTime = Date.now()) {
   const user = (rawUser || '').toLowerCase().replace('@', '');
   const cmd = (rawCmd || '').toLowerCase();
   const args = (rawArgs || '').trim().split(/\s+/).filter(Boolean);
@@ -1513,7 +1516,8 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'catch') {
     const spawn = db.activeSpawn;
     if (!spawn) return `@${user} No wild Pokémon right now!`;
-    if (Date.now() > spawnExpiresAt(spawn)) {
+    // judged by when the trainer SENT the message, not when the bot got around to it
+    if (msgTime > spawnExpiresAt(spawn) || msgTime < (spawn.spawnedAt || 0) - 3000) {
       return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`;
     }
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}! [emote:5756614:CaptFail]`;
@@ -1858,7 +1862,7 @@ app.get('/spawn', checkSecret, async (req, res) => {
     if (Date.now() < (db.autoSpawnBlockedUntil || 0)) {
       return res.send('Skipped: a !spawn was used recently, the automatic spawn is delayed.');
     }
-    if (db.activeSpawn && Date.now() < spawnExpiresAt(db.activeSpawn)) {
+    if (db.activeSpawn && Date.now() < spawnExpiresAt(db.activeSpawn) + FLEE_GRACE_MS) {
       return res.send('Skipped: a Pokémon can still be caught, so the automatic spawn waits for the next cycle.');
     }
     db.lastAutoSpawnAt = Date.now();
@@ -1901,7 +1905,11 @@ app.post('/kick-webhook', async (req, res) => {
     unlock = await lockDB();
     const db = await getDB();
     const isSub = badges.some(b => ['subscriber', 'founder'].includes(b.type));
-    const reply = await processCommand(db, sender, cmd, args, isMod, isSub);
+    // time the message was sent (Kick's timestamp), used so slow processing never makes a catch "too late"
+    let msgTime = Date.parse(payload.created_at || '');
+    if (!Number.isFinite(msgTime) || Math.abs(Date.now() - msgTime) > 120000) msgTime = Date.now(); // missing or implausible timestamp
+    if (msgTime > Date.now()) msgTime = Date.now();
+    const reply = await processCommand(db, sender, cmd, args, isMod, isSub, msgTime);
     if (reply) {
       // Queue the reply while still holding the lock (keeps replies in order), but don't wait for it to be sent:
       // the next command can be processed right away while the reply goes out through the spaced chat queue.
@@ -2486,7 +2494,7 @@ setInterval(async () => {
 
     // Announce when a wild Pokémon flees after the catch window ends
     const spawn = db.activeSpawn;
-    if (spawn && !spawn.fledAnnounced && Date.now() > spawnExpiresAt(spawn)) {
+    if (spawn && !spawn.fledAnnounced && Date.now() > spawnExpiresAt(spawn) + FLEE_GRACE_MS) {
       spawn.fledAnnounced = true;
       const expiredAgo = Date.now() - spawnExpiresAt(spawn);
       if (expiredAgo < 60000) { // skip stale spawns left over from before a restart
