@@ -110,16 +110,17 @@ async function getKickAccessToken(db) {
 
 // Bot messages go out one at a time with a short pause between them, so replies to commands that arrive
 // at the same moment (e.g. many users typing !catch together) never overlap in chat.
-const CHAT_GAP_MS = 500;
+const CHAT_GAP_MS = 300;
 let chatChain = Promise.resolve();
 let lastChatSentAt = 0;
 
-function sendKickChat(db, content) {
+function sendKickChat(db, content, preToken = null) {
   const job = chatChain.then(async () => {
     const wait = lastChatSentAt + CHAT_GAP_MS - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastChatSentAt = Date.now(); // the pause is counted from when the previous message STARTED sending, so slow API calls don't add extra delay
     try {
-      const token = await getKickAccessToken(db);
+      const token = preToken || await getKickAccessToken(db);
       if (!token || !process.env.KICK_BROADCASTER_ID) return;
 
       await axios.post(
@@ -133,8 +134,6 @@ function sendKickChat(db, content) {
       );
     } catch (err) {
       console.error('❌ Kick Chat Error:', err.response?.data || err.message);
-    } finally {
-      lastChatSentAt = Date.now();
     }
   });
   chatChain = job.catch(() => {});
@@ -1875,6 +1874,7 @@ app.get('/spawn', checkSecret, async (req, res) => {
 app.post('/kick-webhook', async (req, res) => {
   res.sendStatus(200); // Acknowledge Kick immediately
   let unlock;
+  let sendJob = null;
   try {
     const eventType = req.headers['kick-event-type'];
     if (eventType !== 'chat.message.sent') return;
@@ -1899,12 +1899,18 @@ app.post('/kick-webhook', async (req, res) => {
     const db = await getDB();
     const isSub = badges.some(b => ['subscriber', 'founder'].includes(b.type));
     const reply = await processCommand(db, sender, cmd, args, isMod, isSub);
-    if (reply) await sendKickChat(db, reply);
+    if (reply) {
+      // Queue the reply while still holding the lock (keeps replies in order), but don't wait for it to be sent:
+      // the next command can be processed right away while the reply goes out through the spaced chat queue.
+      const token = await getKickAccessToken(db).catch(() => null);
+      sendJob = sendKickChat(db, reply, token);
+    }
   } catch (err) {
     console.error('❌ Webhook processing error:', err.message);
   } finally {
     if (unlock) unlock();
   }
+  if (sendJob) await sendJob.catch(() => {});
 });
 
 // Live JSON data for OBS Overlay
