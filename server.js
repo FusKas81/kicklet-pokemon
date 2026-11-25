@@ -49,7 +49,8 @@ const StateSchema = new mongoose.Schema({
   lastBattleResult: { type: Object, default: null },
   lastAutoSpawnAt: { type: Number, default: 0 },
   autoSpawnBlockedUntil: { type: Number, default: 0 },
-  webSessions: { type: Object, default: {} }
+  webSessions: { type: Object, default: {} },
+  redeemedRewards: { type: Array, default: [] } // ids of Channel Points redemptions already paid out
 }, { minimize: false });
 
 const GameState = mongoose.model('GameState', StateSchema);
@@ -88,6 +89,7 @@ function flushDB() {
       doc.markModified('kickAuth');
       doc.markModified('lastBattleResult');
       doc.markModified('webSessions');
+      doc.markModified('redeemedRewards');
       try {
         await doc.save();
       } catch (err) {
@@ -162,6 +164,10 @@ const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 const AUTO_TRAINER = 'fuskas';
 const AUTO_BATTLE_SLOT = 1;   // party slot that always fights (and can never be traded)
 const AUTO_MOVE = 4;          // move it always picks
+
+// Kick Channel Points reward: the redemption title must match this (not case sensitive)
+const REWARD_NAME = 'Random Pokemon';
+const REWARD_COST = 5000; // shown in chat when Kick does not send the cost
 
 // Battle timing
 const BATTLE_LIMIT_MS = 5 * 60 * 1000; // max battle length (and max wait for a challenge to be accepted)
@@ -268,7 +274,27 @@ async function subscribeKickChatWebhook(token) {
   }
 }
 
+// Channel Points redemptions arrive as their own webhook event. This is a separate call, so if it fails
+// (for example the login was made without the rewards permission) chat commands keep working.
+async function subscribeKickRewardWebhook(token) {
+  try {
+    await axios.post(
+      'https://api.kick.com/public/v1/events/subscriptions',
+      {
+        broadcaster_user_id: Number(process.env.KICK_BROADCASTER_ID),
+        events: [{ name: 'channel.reward.redemption.updated', version: 1 }],
+        method: 'webhook'
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    console.log('✅ Subscribed to Kick channel.reward.redemption.updated webhook!');
+  } catch (err) {
+    console.error('⚠️ Rewards webhook subscription notice (log in again with /kick-login?secret=...&rewards=1):', err.response?.data || err.message);
+  }
+}
+
 // Step A: Visit /kick-login?secret=mysecret99 once to authorize
+// (add &rewards=1 to also allow Channel Points rewards)
 app.get('/kick-login', checkSecret, (req, res) => {
   tempPkceVerifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(tempPkceVerifier).digest('base64url');
@@ -278,7 +304,7 @@ app.get('/kick-login', checkSecret, (req, res) => {
     `https://id.kick.com/oauth/authorize?response_type=code` +
     `&client_id=${process.env.KICK_CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&scope=${encodeURIComponent('chat:write user:read events:subscribe')}` +
+    `&scope=${encodeURIComponent('chat:write user:read events:subscribe' + (req.query.rewards ? ' channel:rewards:read channel:rewards:write' : ''))}` +
     `&code_challenge=${challenge}` +
     `&code_challenge_method=S256` +
     `&state=${state}`;
@@ -318,6 +344,7 @@ app.get('/kick-callback', async (req, res) => {
     await saveDB(db);
     } finally { unlockAuth(); }
     await subscribeKickChatWebhook(data.access_token);
+    await subscribeKickRewardWebhook(data.access_token);
 
     res.send('✅ Kick connected! Your Pokémon bot is now listening to chat and posting directly.');
   } catch (err) {
@@ -1558,10 +1585,41 @@ function nextSpawnText(db, spawn) {
   return `${Math.ceil(msLeft / 1000)}s`;
 }
 
+// Channel Points reward "Random Pokemon": gives the trainer a random Pokémon missing from their Pokédex, added to the
+// first free party slot (the end of the party). Returns the chat announcement.
+async function redeemRandomPokemon(db, rawUser, cost) {
+  const user = (rawUser || '').toLowerCase().replace('@', '');
+  if (!user) return null;
+  if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
+  const u = db.users[user];
+  if (u.totalCaught === undefined) u.totalCaught = u.inventory.length;
+  if (!u.pokedex) u.pokedex = [...new Set(u.inventory.map(p => p.id))];
+  if (upgradeUser(db, user)) await saveDB(db);
+
+  const spent = Number.isFinite(cost) && cost > 0 ? cost : REWARD_COST;
+  const partyMax = maxPartyFor(user);
+  if (u.inventory.length >= partyMax) {
+    return `@${user} spent ${spent} Channel Points but your party is full (${partyMax}/${partyMax})! Use !release <slot> and ask a mod to sort out your reward.`;
+  }
+  const missing = [];
+  for (let id = 1; id <= MAX_POKEMON_ID; id++) if (!u.pokedex.includes(id)) missing.push(id);
+  if (missing.length === 0) return `@${user} spent ${spent} Channel Points but already has every Pokémon in the Pokédex! Ask a mod to sort out your reward.`;
+
+  const mon = await generatePokemon(missing[Math.floor(Math.random() * missing.length)]);
+  u.inventory.push(mon);
+  u.totalCaught += 1;
+  if (!u.pokedex.includes(mon.id)) u.pokedex.push(mon.id);
+  markShiny(db, user, mon);
+  recordFirstCatch(db, user, mon);
+  await saveDB(db);
+  return `🎁 @${user} spent ${spent} Channel Points and has received ${mon.isShiny ? '✨SHINY ' : ''}${mon.name}! (${u.inventory.length}/${partyMax}) [emote:37232:PeepoClap]`;
+}
+
 // ===================================================================
 // 8. CHAT COMMANDS
 // processCommand(): every !command (catch, party, info, release, pokedex, leaderboard, trade, accept, battle,
 // move, forfeit, help, verify, spawn + the hidden mod commands). Also used by the website via runCommand().
+// Just above it: redeemRandomPokemon(), the Channel Points "Random Pokemon" reward.
 // ===================================================================
 
 async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub = false, msgTime = Date.now()) {
@@ -1973,7 +2031,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
 // ===================================================================
 // 9. HTTP ROUTES
-// /ping (keep-alive), /spawn (cron job), /kick-webhook (chat messages -> commands), /battle-data (overlay JSON).
+// /ping (keep-alive), /spawn (cron job), /kick-webhook (chat messages -> commands, Channel Points rewards), /battle-data (overlay JSON).
 // ===================================================================
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
@@ -2008,6 +2066,29 @@ app.post('/kick-webhook', async (req, res) => {
   let sendJob = null;
   try {
     const eventType = req.headers['kick-event-type'];
+
+    // Channel Points reward redeemed on Kick
+    if (eventType === 'channel.reward.redemption.updated') {
+      const r = req.body || {};
+      const status = String(r.status || '').toLowerCase();
+      const title = String((r.reward && r.reward.title) || '').trim().toLowerCase();
+      if (title !== REWARD_NAME.toLowerCase() || (status !== 'pending' && status !== 'accepted') || !r.id) return;
+      unlock = await lockDB();
+      const db = await getDB();
+      if (!Array.isArray(db.redeemedRewards)) db.redeemedRewards = [];
+      if (db.redeemedRewards.includes(String(r.id))) return; // already paid out (pending -> accepted sends a second event)
+      db.redeemedRewards.push(String(r.id));
+      if (db.redeemedRewards.length > 300) db.redeemedRewards.splice(0, db.redeemedRewards.length - 300);
+      const redeemer = r.redeemer && (r.redeemer.username || r.redeemer.channel_slug);
+      const rewardReply = await redeemRandomPokemon(db, redeemer, Number(r.reward && r.reward.cost));
+      await saveDB(db);
+      if (rewardReply) {
+        const token = await getKickAccessToken(db).catch(() => null);
+        sendJob = flushConfirmed().then(() => sendKickChat(db, rewardReply, token));
+      }
+      return;
+    }
+
     if (eventType !== 'chat.message.sent') return;
 
     const payload = req.body;
