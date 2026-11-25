@@ -59,6 +59,8 @@ function lockDB() {
 const POKEAPI = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
 const MAX_INVENTORY = 50;
+const FUSKAS_MAX_INVENTORY = 100; // the example trainer @fuskas has a bigger party
+const maxPartyFor = (name) => (name === 'fuskas' ? FUSKAS_MAX_INVENTORY : MAX_INVENTORY);
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
@@ -1515,7 +1517,8 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       return `@${user} Too late to catch the wild ${spawn.name}, it already fled! Next spawn in ${nextSpawnText(db, spawn)}! [emote:5339426:kickDrops]`;
     }
     if (spawn.caughtBy.includes(user)) return `@${user} You already caught this ${spawn.name}! [emote:5756614:CaptFail]`;
-    if (db.users[user].inventory.length >= MAX_INVENTORY) return `@${user} Party full (${MAX_INVENTORY}/${MAX_INVENTORY})! Use !release <1-${MAX_INVENTORY}>.`;
+    const partyMax = maxPartyFor(user);
+    if (db.users[user].inventory.length >= partyMax) return `@${user} Party full (${partyMax}/${partyMax})! Use !release <1-${partyMax}>.`;
 
     // Each trainer gets MAX_CATCH_TRIES attempts per spawn
     if (!spawn.attempts) spawn.attempts = {};
@@ -1541,7 +1544,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     await saveDB(db);
 
     const shinyTag = caughtMon.isShiny ? '✨SHINY ' : '';
-    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${MAX_INVENTORY}) [emote:37232:PeepoClap]`;
+    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${maxPartyFor(user)}) [emote:37232:PeepoClap]`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
     reply += ` | ${SITE_NOTE}`;
@@ -1573,7 +1576,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const from = (page - 1) * PER_PAGE;
     const list = inv.slice(from, from + PER_PAGE).map((p, i) => `[${from + i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
     const pageTxt = pages > 1 ? ` Page ${page}/${pages} (type !party ${page % pages + 1} for more)` : '';
-    return `@${user}'s Party (${inv.length}/${MAX_INVENTORY})${pageTxt}: ${list} | ${tip}${siteNote}`;
+    return `@${user}'s Party (${inv.length}/${maxPartyFor(user)})${pageTxt}: ${list} | ${tip}${siteNote}`;
   }
 
   if (cmd === 'info') {
@@ -2566,6 +2569,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
               name,
               totalCaught: u.totalCaught !== undefined ? u.totalCaught : inv.length,
               battleWins: u.battleWins || 0,
+              maxParty: name === 'fuskas' ? 100 : MAX_INVENTORY,
               pokedex: dex.slice().sort((a, b) => a - b),
               dexDates: (u.dexDates && typeof u.dexDates === 'object') ? u.dexDates : {},
               shinyDates: (u.shinyDates && typeof u.shinyDates === 'object') ? u.shinyDates : {},
@@ -2940,6 +2944,12 @@ const PAGE = `<!DOCTYPE html>
   @keyframes cardflash { 0%, 40% { border-color:var(--gold); box-shadow:0 0 24px rgba(248,192,48,.7); } 100% { border-color:var(--line); box-shadow:none; } }
   .tname { font-size:11px; word-break:break-all; }
   .tname.feat { word-break:normal; line-height:1.7; }
+  .tname .nm.g1, .tname .nm.g2, .tname .nm.g3 { background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; animation:nameShine 2.6s linear infinite; }
+  .tname .nm.g1 { background-image:linear-gradient(110deg,#b8860b 20%,#ffd700 35%,#fffbd0 50%,#ffd700 65%,#b8860b 80%); filter:drop-shadow(0 0 4px rgba(255,215,0,.55)); }
+  .tname .nm.g2 { background-image:linear-gradient(110deg,#7d838c 20%,#d1d5db 35%,#ffffff 50%,#d1d5db 65%,#7d838c 80%); filter:drop-shadow(0 0 4px rgba(220,225,235,.5)); }
+  .tname .nm.g3 { background-image:linear-gradient(110deg,#8a5524 20%,#cd7f32 35%,#f6c08a 50%,#cd7f32 65%,#8a5524 80%); filter:drop-shadow(0 0 4px rgba(205,127,50,.5)); }
+  @keyframes nameShine { 0% { background-position:150% 0; } 100% { background-position:-150% 0; } }
+  @media (prefers-reduced-motion: reduce) { .tname .nm { animation:none !important; } }
   .rank { color:var(--gold); }
   .meta { font-size:8px; color:var(--mute); margin-top:6px; line-height:1.9; }
   .bar { height:10px; background:#0b0c12; border-radius:5px; overflow:hidden; margin:10px 0; border:2px solid #0b0c12; }
@@ -3578,10 +3588,10 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto Battle or Trade, mouse over Pokemon in party to trade!' : '<span class="rank">#' + rank + '</span> @' + esc(u.name)) + '</div>' +
-        '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + data.maxParty + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">⭐</span> @' + esc(u.name) + ' 🤖 !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto Battle or Trade, mouse over Pokemon in party to trade!' : '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
+        '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
-        '<div class="col-title">PARTY (' + u.party.length + '/' + data.maxParty + ')</div><div class="party">' + partyHtml + '</div>' +
+        '<div class="col-title">PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
         '<div class="body">' +
           '<div class="col-dex"><div class="col-title">POKÉDEX</div><div class="grid">' + cells + '</div></div>' +
           '<div class="col-shiny"><div class="col-title">✨ SHINIES CAUGHT</div><div class="shinybox">' + shinyHtml + '</div></div>' +
