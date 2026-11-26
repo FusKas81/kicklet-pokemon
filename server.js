@@ -25,7 +25,15 @@ import zlib from 'zlib';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json());
+// Request bodies: small limit (a chat event is a few KB); rawBody is kept so the Kick signature can be checked.
+app.use(express.json({ limit: '64kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+// Basic security headers on every response.
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 // Bandwidth saver: every text response (HTML, JSON) bigger than 1 KB is sent compressed (brotli / gzip) with an ETag, so
 // browsers that already have the same content get an empty "304 Not Modified". Compressed copies are remembered, so the
@@ -108,6 +116,8 @@ let savedSigs = new Map();
 let lastFullSave = Date.now();
 const sigOf = (v) => JSON.stringify(v === undefined ? null : v);
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// Names such as "__proto__", "constructor" or "toString" would hit built-in object properties instead of a trainer.
+const isUnsafeName = (n) => typeof n !== 'string' || n in Object.prototype;
 
 function captureSigs(doc) {
   const sigs = new Map();
@@ -280,14 +290,18 @@ const BATTLE_RULES = `📜 Gen 2 rules: each round both trainers pick !move <1-4
 
 // Store temporary PKCE verifier in memory during login
 let tempPkceVerifier = null;
+let tempOauthState = null; // checked again when Kick sends the browser back to /kick-callback
 
 // Website logins waiting for the trainer to type !verify <code> in chat (code -> { user, secretHash, expires, verified })
 const webLogins = new Map();
 
+// Protects /kick-login and /spawn. Without BOT_SECRET set on Render these routes are closed (fail safe), never open.
 function checkSecret(req, res, next) {
-  if (process.env.BOT_SECRET && req.query.secret !== process.env.BOT_SECRET) {
-    return res.status(401).send('Unauthorized');
-  }
+  const want = process.env.BOT_SECRET;
+  const got = typeof req.query.secret === 'string' ? req.query.secret : '';
+  const a = crypto.createHash('sha256').update(want || '').digest();
+  const b = crypto.createHash('sha256').update(got).digest();
+  if (!want || !crypto.timingSafeEqual(a, b)) return res.status(401).send('Unauthorized');
   next();
 }
 
@@ -394,7 +408,7 @@ async function subscribeKickRewardWebhook(token) {
 app.get('/kick-login', checkSecret, (req, res) => {
   tempPkceVerifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(tempPkceVerifier).digest('base64url');
-  const state = crypto.randomBytes(16).toString('hex');
+  const state = tempOauthState = crypto.randomBytes(16).toString('hex');
 
   const authUrl =
     `https://id.kick.com/oauth/authorize?response_type=code` +
@@ -412,7 +426,8 @@ app.get('/kick-login', checkSecret, (req, res) => {
 app.get('/kick-callback', async (req, res) => {
   try {
     const code = req.query.code;
-    if (!code || !tempPkceVerifier) {
+    const verifier = tempPkceVerifier;
+    if (typeof code !== 'string' || !verifier || !tempOauthState || req.query.state !== tempOauthState) {
       return res.send('❌ Missing code or session expired. Open /kick-login?secret=mysecret99 again.');
     }
 
@@ -421,7 +436,7 @@ app.get('/kick-callback', async (req, res) => {
       client_id: process.env.KICK_CLIENT_ID,
       client_secret: process.env.KICK_CLIENT_SECRET,
       redirect_uri: REDIRECT_URI,
-      code_verifier: tempPkceVerifier,
+      code_verifier: verifier,
       code
     });
 
@@ -439,13 +454,14 @@ app.get('/kick-callback', async (req, res) => {
     };
     await saveDB(db);
     } finally { unlockAuth(); }
+    tempPkceVerifier = null; tempOauthState = null; // one use only
     await subscribeKickChatWebhook(data.access_token);
     await subscribeKickRewardWebhook(data.access_token);
 
     res.send('✅ Kick connected! Your Pokémon bot is now listening to chat and posting directly.');
   } catch (err) {
     console.error('❌ OAuth Callback Error:', err.response?.data || err.message);
-    res.send('❌ Kick login failed: ' + JSON.stringify(err.response?.data || err.message));
+    res.status(500).send('❌ Kick login failed. Details are in the Render logs.');
   }
 });
 
@@ -1685,7 +1701,7 @@ function nextSpawnText(db, spawn) {
 // first free party slot (the end of the party). Returns the chat announcement.
 async function redeemRandomPokemon(db, rawUser, cost) {
   const user = (rawUser || '').toLowerCase().replace('@', '');
-  if (!user) return null;
+  if (!user || isUnsafeName(user)) return null;
   if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
   const u = db.users[user];
   if (u.totalCaught === undefined) u.totalCaught = u.inventory.length;
@@ -1723,7 +1739,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   const cmd = (rawCmd || '').toLowerCase();
   const args = (rawArgs || '').trim().split(/\s+/).filter(Boolean);
 
-  if (!user) return null;
+  if (!user || isUnsafeName(user)) return null;
   if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
   if (db.users[user].totalCaught === undefined) db.users[user].totalCaught = db.users[user].inventory.length;
   if (!db.users[user].pokedex) db.users[user].pokedex = [...new Set(db.users[user].inventory.map(p => p.id))];
@@ -1742,7 +1758,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'givedex') {
     if (!isMod) return null; // silently ignore everyone except the owner and moderators
     const who = (args[0] || '').toLowerCase().replace('@', '').trim();
-    if (!who) return `@${user} Usage: !givedex @username`;
+    if (!who || isUnsafeName(who)) return `@${user} Usage: !givedex @username`;
     if (!db.users[who]) db.users[who] = { inventory: [], totalCaught: 0, pokedex: [] };
     const tu = db.users[who];
     const all = Array.from({ length: MAX_POKEMON_ID }, (_, i) => i + 1);
@@ -1936,7 +1952,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const target = (args[0] || '').toLowerCase().replace('@', '');
     const slot = parseInt(args[1]) - 1;
     const mon = db.users[user].inventory[slot];
-    if (!target || !db.users[target]) return `@${user} User not found. Use !trade @username <slot>, e.g. !trade @ash 2.`;
+    if (!target || isUnsafeName(target) || !db.users[target]) return `@${user} User not found. Use !trade @username <slot>, e.g. !trade @ash 2.`;
     if (target === user) return `@${user} Can't trade with yourself!`;
     if (args.length < 2 || Number.isNaN(slot) || !mon) {
       return `@${user} Pick which Pokémon to offer: !trade @${target} <slot>, e.g. !trade @${target} 1. Type !party to see your slots (1-${db.users[user].inventory.length}).`;
@@ -2013,7 +2029,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     if (args.length === 0) {
       return `@${user} To battle another trainer, type !battle @username <slot>, e.g. !battle @ash 1 challenges @ash with the Pokémon in your slot 1. They have 5 minutes to accept with !battle @${user} <slot>. Each round both pick !move <1-4>. Use !forfeit to quit. You can do it here ➡️ ${POKEDEX_SITE}`;
     }
-    if (!opponent || !db.users[opponent]) return `@${user} Opponent not found. Use !battle @username <slot>, e.g. !battle @ash 1.`;
+    if (!opponent || isUnsafeName(opponent) || !db.users[opponent]) return `@${user} Opponent not found. Use !battle @username <slot>, e.g. !battle @ash 1.`;
     if (opponent === user) return `@${user} You can't battle yourself!`;
     if (Number.isNaN(slot) || !myMon) return `@${user} Pick one of your Pokémon: !battle @${opponent} <slot>, e.g. !battle @${opponent} 1. Type !party to see your slots.`;
 
@@ -2170,8 +2186,54 @@ app.get('/spawn', checkSecret, async (req, res) => {
   }
 });
 
+// --- Kick webhook authenticity ---
+// Kick signs every event: RSA-SHA256 over "<Kick-Event-Message-Id>.<Kick-Event-Message-Timestamp>.<raw body>".
+// Without this check anyone could POST fake chat events (and run mod commands). Set KICK_WEBHOOK_VERIFY=off on Render
+// only as an emergency switch if Kick changes the scheme.
+let kickPublicKey = null;
+async function getKickPublicKey() {
+  if (kickPublicKey) return kickPublicKey;
+  const { data } = await axios.get('https://api.kick.com/public/v1/public-key', { timeout: 8000 });
+  let pem = String((data && data.data && data.data.public_key) || (data && data.public_key) || '').trim();
+  if (!pem) throw new Error('Kick returned no public key');
+  if (!pem.includes('BEGIN')) pem = `-----BEGIN PUBLIC KEY-----\n${pem.replace(/\s+/g, '').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`;
+  kickPublicKey = crypto.createPublicKey(pem);
+  return kickPublicKey;
+}
+
+const seenWebhookIds = new Set(); // recent message ids: Kick re-sends events it thinks were not received
+const WEBHOOK_MAX_AGE_MS = 10 * 60 * 1000;
+async function verifyKickWebhook(req) {
+  if (String(process.env.KICK_WEBHOOK_VERIFY || '').toLowerCase() === 'off') return true;
+  const id = req.headers['kick-event-message-id'];
+  const ts = req.headers['kick-event-message-timestamp'];
+  const sig = req.headers['kick-event-signature'];
+  if (!id || !ts || !sig || !req.rawBody) return false;
+  const sent = Date.parse(ts);
+  if (Number.isFinite(sent) && Math.abs(Date.now() - sent) > WEBHOOK_MAX_AGE_MS) return false; // too old / replayed
+  let ok = false;
+  try {
+    const key = await getKickPublicKey();
+    ok = crypto.verify('RSA-SHA256', Buffer.concat([Buffer.from(`${id}.${ts}.`), req.rawBody]), key, Buffer.from(String(sig), 'base64'));
+  } catch (e) {
+    console.error('❌ Webhook signature check failed to run:', e.message);
+    return false;
+  }
+  if (!ok) return false;
+  if (seenWebhookIds.has(id)) return 'duplicate';
+  seenWebhookIds.add(id);
+  if (seenWebhookIds.size > 1000) seenWebhookIds.delete(seenWebhookIds.values().next().value);
+  return true;
+}
+
 // Direct Kick Webhook Receiver (Listens to Kick chat messages)
 app.post('/kick-webhook', async (req, res) => {
+  const verdict = await verifyKickWebhook(req);
+  if (verdict !== true) {
+    if (verdict === 'duplicate') return res.sendStatus(200);
+    console.warn('⚠️ Rejected a webhook call with a missing or invalid Kick signature.');
+    return res.sendStatus(400);
+  }
   res.sendStatus(200); // Acknowledge Kick immediately
   let unlock;
   let sendJob = null;
@@ -2486,7 +2548,7 @@ const OVERLAY_HTML = externalizePage(`<!DOCTYPE html>
 
     function $(id) { return document.getElementById(id); }
     function serverNow() { return Date.now() + offset; }
-    function esc(s) { return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'); }
+    function esc(s) { return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;'); }
 
     function play(el, cls, ms) {
       el.classList.remove(cls);
@@ -3019,7 +3081,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
       if (!username || username.length > 40) return res.status(400).json({ error: 'Type your Kick username.' });
 
       const db = await getDB();
-      if (!db.users || !db.users[username]) {
+      if (isUnsafeName(username) || !db.users || !db.users[username]) {
         return res.status(404).json({ error: 'No trainer with that name yet. Catch a Pokémon in chat first!' });
       }
 
