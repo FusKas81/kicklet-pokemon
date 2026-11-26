@@ -1931,11 +1931,12 @@ function nextSpawnText(db, spawn) {
 // /kick-login?secret=...&rewards=1): 'accept' = approve it (points stay spent), 'reject' = refund the points.
 // Returns true when Kick took it.
 async function settleRedemption(token, redemptionId, action) {
-  if (!token) return false;
+  if (!token) { console.error(`❌ Cannot ${action} redemption ${redemptionId}: the bot has no Kick login token`); return false; }
   try {
-    await axios.post(`https://api.kick.com/public/v1/channels/rewards/redemptions/${action}`, { ids: [String(redemptionId)] }, {
+    const { data } = await axios.post(`https://api.kick.com/public/v1/channels/rewards/redemptions/${action}`, { ids: [String(redemptionId)] }, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000
     });
+    console.log(`🎁 Redemption ${redemptionId}: ${action} -> Kick answered`, JSON.stringify(data).slice(0, 300));
     return true;
   } catch (e) {
     console.error(`❌ Could not ${action} the Channel Points redemption:`, e.response?.status, JSON.stringify(e.response?.data || e.message));
@@ -2500,6 +2501,7 @@ app.post('/kick-webhook', async (req, res) => {
       db.redeemedRewards.push(String(r.id));
       if (db.redeemedRewards.length > 300) db.redeemedRewards.splice(0, db.redeemedRewards.length - 300);
       const redeemer = r.redeemer && (r.redeemer.username || r.redeemer.channel_slug);
+      console.log(`🎁 Reward event: id=${r.id} status=${status} redeemer=${redeemer}`);
       const outcome = {};
       let rewardReply = await redeemRandomPokemon(db, redeemer, Number(r.reward && r.reward.cost), outcome);
       await saveDB(db);
