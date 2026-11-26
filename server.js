@@ -25,6 +25,7 @@ import zlib from 'zlib';
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1); // behind Render's proxy: req.ip is the real visitor, so rate limits are per visitor
 // Request bodies: small limit (a chat event is a few KB); rawBody is kept so the Kick signature can be checked.
 app.use(express.json({ limit: '64kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 
@@ -32,6 +33,17 @@ app.use(express.json({ limit: '64kb', verify: (req, res, buf) => { req.rawBody =
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// Flood protection for the website API: at most 240 calls per minute per visitor (normal use is about 30).
+const apiHits = new Map(); // ip -> { n, resetAt }
+app.use('/api', (req, res, next) => {
+  const now = Date.now();
+  if (apiHits.size > 5000) apiHits.clear();
+  let h = apiHits.get(req.ip);
+  if (!h || h.resetAt < now) { h = { n: 0, resetAt: now + 60000 }; apiHits.set(req.ip, h); }
+  if (++h.n > 240) return res.status(429).json({ error: 'Too many requests, slow down.' });
   next();
 });
 
@@ -2320,18 +2332,23 @@ async function buildBattlePayload() {
 
 // The overlay sends the fingerprint of what it already has (?h=...). With ?wait=1 the request is held (up to 25 s)
 // until something changes, so an idle overlay makes about 2 requests a minute instead of 60. Nothing changed -> only the clock.
+let waiters = 0;            // overlay requests currently held open
+const MAX_WAITERS = 20;     // more than the few real overlays: extra callers just get a normal quick answer
 app.get('/battle-data', async (req, res) => {
   try {
     let { payload, hash } = await buildBattlePayload();
-    if (req.query.wait && req.query.h && req.query.h === hash) {
+    if (req.query.wait && req.query.h && req.query.h === hash && waiters < MAX_WAITERS) {
       let closed = false;
+      waiters++;
       req.on('close', () => { closed = true; });
       const until = Date.now() + 25000;
-      while (!closed && Date.now() < until) {
-        await new Promise((r) => setTimeout(r, 500));
-        ({ payload, hash } = await buildBattlePayload());
-        if (hash !== req.query.h) break;
-      }
+      try {
+        while (!closed && Date.now() < until) {
+          await new Promise((r) => setTimeout(r, 500));
+          ({ payload, hash } = await buildBattlePayload());
+          if (hash !== req.query.h) break;
+        }
+      } finally { waiters--; }
       if (closed) return;
     }
     res.set('Cache-Control', 'no-store');
@@ -3139,6 +3156,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
   app.get('/api/me', async (req, res) => {
     let unlock;
     try {
+      if (!sessionUser(await getDB(), req)) return res.status(401).json({ error: 'not logged in' }); // no lock for strangers
       unlock = await lockDB();
       const db = await getDB();
       const user = sessionUser(db, req);
@@ -3161,6 +3179,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
   app.post('/api/logout', async (req, res) => {
     let unlock;
     try {
+      if (!sessionUser(await getDB(), req)) return res.json({ ok: true }); // nothing to log out of, no lock needed
       unlock = await lockDB();
       const db = await getDB();
       const h = req.headers.authorization || '';
@@ -3181,6 +3200,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
   app.post('/api/release', async (req, res) => {
     let unlock;
     try {
+      if (!sessionUser(await getDB(), req)) return res.status(401).json({ error: 'Please log in again.' });
       unlock = await lockDB();
       const db = await getDB();
       const user = sessionUser(db, req);
