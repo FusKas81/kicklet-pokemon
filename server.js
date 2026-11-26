@@ -4310,7 +4310,7 @@ const PAGE = `<!DOCTYPE html>
           var u = im.getAttribute('data-src');
           if (u) { im.removeAttribute('data-src'); im.src = u; }
         });
-      }, { rootMargin: '0px' });
+      }, { rootMargin: '0px 0px 600px 0px' }); // also load what is about one screen below, so scrolling never shows empty slots
     }
     for (var i = 0; i < imgs.length; i++) imgObserver.observe(imgs[i]);
   }
