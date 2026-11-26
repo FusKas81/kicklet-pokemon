@@ -1726,10 +1726,10 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     await saveDB(db);
 
     const shinyTag = caughtMon.isShiny ? '✨SHINY ' : '';
-    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]! (${db.users[user].inventory.length}/${maxPartyFor(user)}) [emote:37232:PeepoClap]`;
+    let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]!${user === AUTO_TRAINER ? '' : ` (${db.users[user].inventory.length}/${maxPartyFor(user)})`} [emote:37232:PeepoClap]`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
-    reply += ` | ${SITE_NOTE}`;
+    if (user !== AUTO_TRAINER) reply += ` | ${SITE_NOTE}`;
     return reply;
   }
 
@@ -3311,6 +3311,17 @@ const PAGE = `<!DOCTYPE html>
 <div id="toast"></div>
 
 <script>
+  // @fuskas is a bot: everywhere the site writes his name it becomes 🤖@fuskas
+  function botify(s) {
+    // text inside <span class="nb">...</span> is left exactly as written
+    return String(s).split(/(<span class="nb">[\\s\\S]*?<\\/span>)/).map(function (part, i) {
+      return i % 2 ? part : part.replace(/(🤖)?@fuskas(?![A-Za-z0-9_])/gi, function (m, has) { return has ? m : '🤖@fuskas'; });
+    }).join('');
+  }
+  (function () {
+    var d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    Object.defineProperty(Element.prototype, 'innerHTML', { get: d.get, configurable: true, set: function (v) { d.set.call(this, typeof v === 'string' ? botify(v) : v); } });
+  })();
   var BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
   var data = null, lastJson = '', byId = {}, prevBoards = {};
   var me = null, token = null, loginTimer = null, loginState = null, toastTimer = null;
@@ -3324,7 +3335,7 @@ const PAGE = `<!DOCTYPE html>
 
   function toast(msg) {
     var t = $('toast');
-    t.textContent = msg;
+    t.textContent = botify(msg);
     t.classList.add('show');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.classList.remove('show'); }, 3500);
@@ -3826,10 +3837,10 @@ const PAGE = `<!DOCTYPE html>
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
-        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">🤖</span> !battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade.' : '' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
+        '<div class="tname' + (isFeatured ? ' feat' : '') + '">' + (isFeatured ? '<span class="rank">🤖</span> <span class="nb">!battle @' + esc(u.name) + ' or !trade @' + esc(u.name) + ' to Auto-Battle/Trade. Mouse Over Pokemon in @' + esc(u.name) + ' Party to Trade.</span>' : '' + (rank >= 1 && rank <= 3 ? '<span class="medal m' + rank + '">' + ['🥇', '🥈', '🥉'][rank - 1] + '</span> ' : '') + '<span class="rank">#' + rank + '</span> <span class="nm' + (rank >= 1 && rank <= 3 ? ' g' + rank : '') + '">@' + esc(u.name) + '</span>') + '</div>' +
         '<div class="meta">CAUGHT ' + u.totalCaught + ' &middot; POKÉDEX ' + u.pokedex.length + '/' + data.max + ' &middot; PARTY ' + u.party.length + '/' + (u.maxParty || data.maxParty) + ' &middot; SHINIES ' + u.shinies.length + ' &middot; WINS ' + u.battleWins + '</div>' +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
-        '<div class="col-title">' + (isFeatured ? '@' + esc(u.name) + ' ' : '') + 'PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
+        '<div class="col-title">' + (isFeatured ? '<span class="nb">@' + esc(u.name) + '</span> ' : '') + 'PARTY (' + u.party.length + '/' + (u.maxParty || data.maxParty) + ')</div><div class="party">' + partyHtml + '</div>' +
         '<div class="body">' +
           '<div class="col-dex"><div class="col-title">POKÉDEX</div><div class="grid">' + cells + '</div></div>' +
           '<div class="col-shiny"><div class="col-title">✨ SHINIES CAUGHT</div><div class="shinybox">' + shinyHtml + '</div></div>' +
