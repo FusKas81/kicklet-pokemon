@@ -155,6 +155,11 @@
 //     REWARD_NAME ("Random Pokemon" by default) with the price you like. Leave "require user input" off.
 //  3. When a viewer redeems it the bot gives a random Pokémon missing from their Pokédex and announces it in chat.
 //     It is paid once per redemption even when Kick sends two events (pending, then accepted).
+//  4. When the Pokémon is delivered the bot approves the redemption on Kick by itself (the queue stays clean). If it can't be
+//     given (party full, or the viewer already has the whole Pokédex) the bot rejects the redemption, which gives the
+//     Channel Points back, and says so in chat. This needs the &rewards=1 login of Part 7 (permission
+//     channel:rewards:write) and a reward that waits in Kick's redemption queue (do NOT turn on "skip redemption queue").
+//     If Kick refuses the refund the bot says a mod can refund it, and the reason is written in the Render logs.
 //
 // -------------------------------------------------------------------
 // PART 9 - OBS OVERLAY (shows the wild Pokémon and the battles)
@@ -1922,11 +1927,27 @@ function nextSpawnText(db, spawn) {
   return `${Math.ceil(msLeft / 1000)}s`;
 }
 
+// Settles a pending redemption on Kick (needs the channel:rewards:write permission, i.e.
+// /kick-login?secret=...&rewards=1): 'accept' = approve it (points stay spent), 'reject' = refund the points.
+// Returns true when Kick took it.
+async function settleRedemption(token, redemptionId, action) {
+  if (!token) return false;
+  try {
+    await axios.post(`https://api.kick.com/public/v1/channels/rewards/redemptions/${action}`, { ids: [String(redemptionId)] }, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 10000
+    });
+    return true;
+  } catch (e) {
+    console.error(`❌ Could not ${action} the Channel Points redemption:`, e.response?.status, JSON.stringify(e.response?.data || e.message));
+    return false;
+  }
+}
+
 // Channel Points reward "Random Pokemon": gives the trainer a random Pokémon missing from their Pokédex, added to the
 // first free party slot (the end of the party). Returns the chat announcement.
-async function redeemRandomPokemon(db, rawUser, cost) {
+async function redeemRandomPokemon(db, rawUser, cost, out = {}) { // out.refund = true when the points must be given back
   const user = (rawUser || '').toLowerCase().replace('@', '');
-  if (!user || isUnsafeName(user)) return null;
+  if (!user || isUnsafeName(user)) { out.refund = true; return null; }
   if (!db.users[user]) db.users[user] = { inventory: [], totalCaught: 0, pokedex: [] };
   const u = db.users[user];
   if (u.totalCaught === undefined) u.totalCaught = u.inventory.length;
@@ -1936,11 +1957,12 @@ async function redeemRandomPokemon(db, rawUser, cost) {
   const spent = Number.isFinite(cost) && cost > 0 ? cost : REWARD_COST;
   const partyMax = maxPartyFor(user);
   if (u.inventory.length >= partyMax) {
-    return `@${user} spent ${spent} Channel Points but your party is full (${partyMax}/${partyMax})! Use !release <slot> and ask a mod to sort out your reward.`;
+    out.refund = true;
+    return `@${user} your party is full (${partyMax}/${partyMax}), the Pokémon could not be added! Use !release <slot> to make room.`;
   }
   const missing = [];
   for (let id = 1; id <= MAX_POKEMON_ID; id++) if (!u.pokedex.includes(id)) missing.push(id);
-  if (missing.length === 0) return `@${user} spent ${spent} Channel Points but already has every Pokémon in the Pokédex! Ask a mod to sort out your reward.`;
+  if (missing.length === 0) { out.refund = true; return `@${user} already has every Pokémon in the Pokédex, there is nothing new to give!`; }
 
   const mon = await generatePokemon(missing[Math.floor(Math.random() * missing.length)]);
   u.inventory.push(mon);
@@ -2478,8 +2500,18 @@ app.post('/kick-webhook', async (req, res) => {
       db.redeemedRewards.push(String(r.id));
       if (db.redeemedRewards.length > 300) db.redeemedRewards.splice(0, db.redeemedRewards.length - 300);
       const redeemer = r.redeemer && (r.redeemer.username || r.redeemer.channel_slug);
-      const rewardReply = await redeemRandomPokemon(db, redeemer, Number(r.reward && r.reward.cost));
+      const outcome = {};
+      let rewardReply = await redeemRandomPokemon(db, redeemer, Number(r.reward && r.reward.cost), outcome);
       await saveDB(db);
+      if (rewardReply || outcome.refund) {
+        const token = await getKickAccessToken(db).catch(() => null);
+        if (outcome.refund) {
+          const refunded = await settleRedemption(token, r.id, 'reject'); // could not give the Pokémon: points back
+          if (rewardReply) rewardReply += refunded ? ' 💰 Your Channel Points were refunded.' : ' A mod can refund your Channel Points.';
+        } else if (status === 'pending') {
+          await settleRedemption(token, r.id, 'accept'); // Pokémon delivered: approve the redemption so the queue stays clean
+        }
+      }
       if (rewardReply) {
         const token = await getKickAccessToken(db).catch(() => null);
         sendJob = flushConfirmed().then(() => sendKickChat(db, rewardReply, token));
