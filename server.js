@@ -1909,9 +1909,24 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const mode = (args[0] || '').toLowerCase();
     const catchLine = `🏆 Most catches: ${catches || 'nobody yet, be the first with !catch!'}`;
     const winLine = `⚔️ Most battle wins: ${wins || 'nobody yet, challenge someone with !battle!'}`;
+    // Shiny top 3: different shiny species caught (the same species the website counts)
+    const shinyTop = Object.entries(db.users)
+      .filter(([name]) => name !== 'fuskas')
+      .map(([name, data]) => {
+        const set = new Set(Array.isArray(data.shinies) ? data.shinies : []);
+        (data.inventory || []).forEach(p => { if (p.isShiny) set.add(p.id); });
+        return { name, n: set.size };
+      })
+      .filter(e => e.n > 0)
+      .sort((x, y) => y.n - x.n)
+      .slice(0, 3)
+      .map((e, i) => `${medals[i]} @${e.name} (${e.n})`)
+      .join(' | ');
+    const shinyLine = `✨ Most shiny caught: ${shinyTop || 'nobody yet!'}`;
     if (mode.startsWith('catch')) return catchLine;
     if (mode.startsWith('battle') || mode.startsWith('win')) return winLine;
-    return `${catchLine} || ${winLine}`;
+    if (mode.startsWith('shin')) return shinyLine;
+    return `${catchLine} || ${winLine} || ${shinyLine}`;
   }
 
   if (cmd === 'trade') {
