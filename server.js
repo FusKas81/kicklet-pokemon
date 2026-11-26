@@ -685,6 +685,8 @@ app.get('/kick-callback', async (req, res) => {
     await saveDB(db);
     } finally { unlockAuth(); }
     tempPkceVerifier = null; tempOauthState = null; // one use only
+    console.log('🔑 Kick login done. Permissions granted:', data.scope || '(Kick did not say)');
+    if (!String(data.scope || '').includes('channel:rewards:write')) console.warn('⚠️ Channel Points refunds will NOT work: log in with /kick-login?secret=...&rewards=1');
     await subscribeKickChatWebhook(data.access_token);
     await subscribeKickRewardWebhook(data.access_token);
 
