@@ -21,9 +21,44 @@ import express from 'express';
 import axios from 'axios';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
+import zlib from 'zlib';
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json());
+
+// Bandwidth saver: every text response (HTML, JSON) bigger than 1 KB is sent compressed (brotli / gzip) with an ETag, so
+// browsers that already have the same content get an empty "304 Not Modified". Compressed copies are remembered, so the
+// same page / data is only compressed once.
+const compressMemo = new Map(); // body text -> { etag, br, gz }
+app.use((req, res, next) => {
+  const plainSend = res.send;
+  res.send = function (body) {
+    try {
+      const type = String(res.getHeader('Content-Type') || '');
+      const accepts = String(req.headers['accept-encoding'] || '');
+      if (typeof body !== 'string' || body.length < 1024 || res.getHeader('Content-Encoding') || !/json|html|text/.test(type) || !/\b(br|gzip)\b/.test(accepts)) {
+        return plainSend.call(this, body);
+      }
+      let entry = compressMemo.get(body);
+      if (!entry) {
+        entry = { etag: 'W/"' + crypto.createHash('sha1').update(body).digest('base64') + '"' };
+        compressMemo.set(body, entry);
+        if (compressMemo.size > 12) compressMemo.delete(compressMemo.keys().next().value);
+      }
+      const useBr = /\bbr\b/.test(accepts);
+      if (useBr && !entry.br) entry.br = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } });
+      if (!useBr && !entry.gz) entry.gz = zlib.gzipSync(body, { level: 6 });
+      if (!res.getHeader('ETag')) res.setHeader('ETag', entry.etag);
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Content-Encoding', useBr ? 'br' : 'gzip');
+      return plainSend.call(this, useBr ? entry.br : entry.gz);
+    } catch (e) {
+      return plainSend.call(this, body);
+    }
+  };
+  next();
+});
 
 if (!process.env.MONGO_URI) {
   console.error('❌ ERROR: MONGO_URI is missing in Render!');
@@ -64,12 +99,77 @@ let flushTimer = null;
 let flushing = Promise.resolve();
 const FLUSH_DELAY_MS = 250;
 
+// Only what changed is sent to MongoDB (saves a lot of bandwidth: before, every save re-sent every trainer).
+// savedSigs remembers, as JSON text, what MongoDB already holds: one entry per game-state field and one per trainer
+// ('users.<name>'). A save compares the current state with it and writes just the differences with $set / $unset.
+const SAVED_FIELDS = ['activeSpawn', 'pendingTrades', 'activeBattles', 'kickAuth', 'lastBattleResult', 'lastAutoSpawnAt', 'autoSpawnBlockedUntil', 'webSessions', 'redeemedRewards'];
+const FULL_SAVE_EVERY_MS = 30 * 60 * 1000; // safety net: a complete save now and then
+let savedSigs = new Map();
+let lastFullSave = Date.now();
+const sigOf = (v) => JSON.stringify(v === undefined ? null : v);
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+function captureSigs(doc) {
+  const sigs = new Map();
+  for (const f of SAVED_FIELDS) sigs.set(f, sigOf(doc[f]));
+  const users = doc.users || {};
+  for (const n of Object.keys(users)) sigs.set('users.' + n, sigOf(users[n]));
+  return sigs;
+}
+
+// Writes only the differences. Returns false if a full save is needed instead (unusual trainer name).
+async function savePartial(doc) {
+  const set = {};
+  const unset = {};
+  const commit = [];
+  for (const f of SAVED_FIELDS) {
+    const sg = sigOf(doc[f]);
+    if (savedSigs.get(f) !== sg) { set[f] = JSON.parse(sg); commit.push([f, sg]); }
+  }
+  const users = doc.users || {};
+  for (const n of Object.keys(users)) {
+    const sg = sigOf(users[n]);
+    if (!n || n.includes('.') || n.startsWith('$')) { // MongoDB cannot $set a path with such a name: only a full save can store it
+      if (savedSigs.get('users.' + n) !== sg) return false;
+      continue;
+    }
+    if (savedSigs.get('users.' + n) !== sg) { set['users.' + n] = JSON.parse(sg); commit.push(['users.' + n, sg]); }
+  }
+  for (const k of savedSigs.keys()) {
+    if (k.startsWith('users.') && !hasOwn(users, k.slice(6))) { unset[k] = ''; commit.push([k, null]); }
+  }
+  if (!commit.length) return true; // nothing changed: nothing to send
+  const update = {};
+  if (Object.keys(set).length) update.$set = set;
+  if (Object.keys(unset).length) update.$unset = unset;
+  await GameState.collection.updateOne({ _id: doc._id }, update);
+  for (const [k, sg] of commit) { if (sg === null) savedSigs.delete(k); else savedSigs.set(k, sg); }
+  return true;
+}
+
+async function saveFull(doc) {
+  const sigs = captureSigs(doc); // taken before saving, so a change made while saving is simply sent again next time
+  doc.markModified('users');
+  doc.markModified('activeSpawn');
+  doc.markModified('pendingTrades');
+  doc.markModified('activeBattles');
+  doc.markModified('kickAuth');
+  doc.markModified('lastBattleResult');
+  doc.markModified('webSessions');
+  doc.markModified('redeemedRewards');
+  await doc.save();
+  savedSigs = sigs;
+  lastFullSave = Date.now();
+}
+
 async function getDB() {
   if (cachedDoc) return cachedDoc;
   if (!loadingDoc) {
     loadingDoc = (async () => {
       let doc = await GameState.findById('main');
       if (!doc) doc = await GameState.create({ _id: 'main' });
+      savedSigs = captureSigs(doc);
+      lastFullSave = Date.now();
       cachedDoc = doc;
       return doc;
     })().finally(() => { loadingDoc = null; });
@@ -82,16 +182,8 @@ function flushDB() {
     while (dirty && cachedDoc) {
       dirty = false;
       const doc = cachedDoc;
-      doc.markModified('users');
-      doc.markModified('activeSpawn');
-      doc.markModified('pendingTrades');
-      doc.markModified('activeBattles');
-      doc.markModified('kickAuth');
-      doc.markModified('lastBattleResult');
-      doc.markModified('webSessions');
-      doc.markModified('redeemedRewards');
       try {
-        await doc.save();
+        if (Date.now() - lastFullSave > FULL_SAVE_EVERY_MS || !(await savePartial(doc))) await saveFull(doc);
       } catch (err) {
         dirty = true; // try again on the next round
         console.error('❌ Could not save game state:', err.message);
@@ -2135,14 +2227,18 @@ app.get('/battle-data', async (req, res) => {
     const db = await getDB();
     const keys = Object.keys(db.activeBattles || {});
     const activeKey = keys.find(k => db.activeBattles[k].p2Mon) || keys[0];
-    res.json({
+    const payload = {
       active: Boolean(activeKey),
       battle: activeKey ? db.activeBattles[activeKey] : null,
       spawn: db.activeSpawn || null,
       result: db.lastBattleResult || null,
-      now: Date.now(),
       limits: { move: MOVE_LIMIT_MS, battle: BATTLE_LIMIT_MS }
-    });
+    };
+    // The overlay sends the fingerprint of what it already has (?h=...). If nothing changed, only the clock is sent back.
+    const hash = crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex').slice(0, 12);
+    res.set('Cache-Control', 'no-store');
+    if (req.query.h === hash) return res.json({ same: true, now: Date.now() });
+    res.json({ ...payload, hash, now: Date.now() });
   } catch (e) {
     res.json({ active: false, battle: null, spawn: null, result: null, now: Date.now() });
   }
@@ -2626,10 +2722,13 @@ app.get('/overlay', (req, res) => {
     }
     window.addEventListener('resize', layout);
 
+    var lastHash = '', lastData = null, pollMs = 1000;
     async function tick() {
       try {
-        var res = await fetch('/battle-data');
+        var res = await fetch('/battle-data?h=' + lastHash);
         var data = await res.json();
+        if (data.same && lastData) data = Object.assign({}, lastData, { now: data.now });
+        else { lastData = data; lastHash = data.hash || ''; }
         if (data.now) offset = data.now - Date.now();
         if (data.limits) limits = data.limits;
 
@@ -2672,12 +2771,14 @@ app.get('/overlay', (req, res) => {
         }
 
         layout();
+        // nothing on screen: ask less often
+        pollMs = (frame.style.display === 'none' && card.style.display === 'none') ? 2000 : 1000;
       } catch (e) {}
     }
-    setInterval(tick, 1000);
+    function pollLoop() { tick().then(function () { setTimeout(pollLoop, pollMs); }); }
     setInterval(renderTimer, 250);
     setInterval(renderSpawnTimer, 250);
-    tick();
+    pollLoop();
   </script>
 </body>
 </html>
@@ -2804,10 +2905,11 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
           })
           .filter((u) => u.totalCaught > 0 || u.pokedex.length > 0 || u.party.length > 0)
           .sort((a, b) => b.totalCaught - a.totalCaught || b.pokedex.length - a.pokedex.length);
-        cache = { at: Date.now(), data: { max: MAX_POKEMON_ID, maxParty: MAX_INVENTORY, species, users, now: Date.now() } };
+        cache = { at: Date.now(), data: { max: MAX_POKEMON_ID, maxParty: MAX_INVENTORY, species, users } };
+        cache.body = JSON.stringify(cache.data);
       }
-      res.set('Cache-Control', 'no-store');
-      res.json(cache.data);
+      res.set('Cache-Control', 'no-cache'); // the browser keeps a copy but asks the server if it is still current (tiny 304 answer)
+      res.type('json').send(cache.body);
     } catch (e) {
       console.error('❌ /api/pokedex error:', e.message);
       res.status(500).json({ error: 'failed' });
@@ -3071,22 +3173,16 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
     }
   });
 
-  app.get(['/pokedex', '/pokedex/'], (req, res) => res.type('html').send(PAGE));
-  app.get('/favicon.ico', (req, res) => { res.set('Cache-Control', 'public, max-age=86400'); res.type('png').send(Buffer.from(FAVICON_B64, 'base64')); });
+  app.get(['/pokedex', '/pokedex/'], (req, res) => { res.set('Cache-Control', 'public, max-age=60'); res.type('html').send(PAGE); });
 }
 
 // NOTE: this page is a plain template string. Do not use backticks or dollar-brace inside the script.
-// Site icon (KickDrops logo), shown in the browser tab and served at /favicon.ico
-const FAVICON_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAhVElEQVR42uW7WY+kyZWe+dj2Lb7G4hGRGblVZu3FJin2om4M0DODGQGaHzH/UVe6kG5nIEGi0M2iimRXVe6RmbH67t9uZmcuPDIzqpJFUUJfDKAAHIFw98/CzrFjZ31flffHwv/EP/affUX103/Ku/fUT34oP/jmn/iR/78pQF0Lpt4LpgDUDSlFQBRKgVLq+gUisv1I5EPBbqwlN4S/qSiF2j77z6GA/5GF1PVeYoxIkHcCIbwTTClQRqG0EGPE+wjEGytorNFos1UMAhK3z7+TVYHWCnX9kmvlRInbZ/579nz9ff3HzUt+2uzkRwf6dv+K65O9cUry/rS2S8oNs483XvLupRQ/sKKb/1O9/X3jc3lnC/KT+/xTstkfa8Va+9PaVO/XUO+0KIQQCQIqN7jc4VKDTRTagEnApYbQQr2IhEqTZhm7+3129nOSXFHVDat5yXLWUq1bgg/oRDA5mES9M/8Yhbby+CoiTcAKmGtriFGQKNsjvX5A4tur+aGVhxCIMWKVUsS4NUVrLVmWYay9NuMfqVFfry3b09BGIwh151FOkx/1GN4d0N/LyPqaJFekQ01/nNKsIlffdXQzx9HkiK9+dZfPf3nIaKK4vJrx+A/nPP5mwemzJeWmQvcD6QTSkcFYUEZoG89m2rB609Bc1Jgi4LTCWk1oI6ELYARl1Pb6xA/NXimF9566qgghfOgDjLXYn1IAN0zw+kQ6gZAlZEc9jn+xw/FXQ7I9g7KQ2gRrEpS2VBuP7TWkMeX+0SGffTbhzsMh2TCSTDxqEMgPMnY/ybi82tC2Hpdo0h1wO550IEiAcuWZvmi4+N2K5eMN5drjgqA6IGi0KBQK425YfNxeEa01SiniDbk+UECMkSgRiTcUoBRK3t9jYzURaCTSWYU7zNj/asSDX444fpgSrKcqIxZNbAzFWmiDJ7/lOTzQ7I/XtO6Exy+e0/kWhaAtTD4CfSTYK8XyjSWuLEZ3WOdJE0isZWcvZ7iTAJGy6qhPOmIXcVZh0UgthC5uTd+pH0SYrW/VSIx/Ogz+QHiAEAlh62ZEabwoglZ0RsgmluOfD3jwl0MOji2+CKxOhc1cYXKPHkfaJELe4fKOWhquyoZpB01Z4bsOqw1JnmDShEYEbMBNLO0g0lSeYtqxPomkKjI8ArejmDxytJKxOQ7QeJyxhBqWTyvKkxbTKFzPYqxC6e11iFFQKv6384C3TlDieyUoCybXqNTSeE1Umt5eyvGXGZ/+zZCDe45y0fH6t57Z7w3t2qAPSnpfdmSPwGbgV57lK4+iw5pAYiPaCBKEzms6b5GgUcqidlO6vqMsI5tnHfXjgPGenXstBz93DO9avvy7PWI9IrQeSYVy3XL2G7j4daB6JcRu6xN1ep2jRPWBg7d/0tuH68iVaNJ9zeCBw+1bpjNPVSpufzrgy78aszsxbM5qXn7T8fproT7XW2dc15TSkRcKM1KE1uPXLfgWTcRqjdaaKJGAXN9NjVEOM0wIiaOZQ/0cqjcRFRRtUOhxzsHtfe4/mmBNQtWUhHyBdysefOE4+2LI43+34vQfC9oqkmizdeDvIoT8tyzgxlWICuU09ihh9+cp408svXmgWig++2zMx1/uUMwqnr0uOPs+sL4C0TVp1hK7Dv8UyjcaNYTY6zBJwAUhloqmUASvUFbj+oLLA2Ij3rfExkNloFFIq7Z7MYpODL5OUWVOXu/hzADtS1QG2YGQf2E5fhTxrWF11bJ60hKarY8xueZd9vQnLeCt79OAVgQFrRJCLzK6bzj+akDS9tgdDMgHjhiF/QeexVlFtanYzAtCV6MRVLCEUsMGzAjs0KGUIRZCMwv4FkxikEoTbCQaoQtCaCJUASNbD15tOqISjiZ9hkOLbz0vH6/QMZIkht1bY8zQ0tmOTip2Pulx52/G0K0pXnXEEG8WI3+eAtAgWvAqbO9oA6lO+OTBPvv5iGIVWCwakiznoy8HWL1CmXOefx1ZXXq0gayn0QkopbHBomuHOItIRKkGhYco+Aq6aLYZrxGUCcTUE4IQm0hddaAj2WDA7pGllZJnJzX4jN3xGIlDys2AaXvJPK5xPbj18wGrVw3L0wbVCEl8m2W+z47sD4R+l9IqBPBB6EIg9sH1Lf0sp88uedzBKYexC5TUhMUQV024tTPEfxUplxXlpqGrAiIK1zNoZfCtoSs0xoEERYwGHwIhtEQJCOASQ5oYTCJAR2y2Ia030uRjy/jIYDJPjA1osHstceS5WgjlHzRnsxXNaMnxzzTaRVrdUrUNabjOcJX6Qdps/4j8CBBEaImEVBjcttz+rMfdezv0GXH1BE7DBpNXGKWozw3tpcGNM0Z7fSb3B8zPK+YnNb4Clwk6F6JEutojQaGVwmYKrEXU9R1NIMkU1glaA9GhvcFGizIRN4okOWyKmn5fs3eUYPeE1m+4eNExfQalX9IbNkTv8G3Ea4/kEWnkw5wYsDdrTIVCo4g+0NDh80B+L+PuX435/G8n3Ls3Rgr4/h9nnL2q2T/MuPdol9BqlnKBVAXBLEmGwv7tnGoaKZYNummxI002tmQDR6LN9jS0IslSRoM9xoM+aWrxsaZsV3RtINU9dvt79NKU1WbK2eINxaKGxJGOhP4ONKVw9qTh4nFBiIG9zz3HvzCMdzOWFzB+MGI9F/zrgK8jOmiUKNS1M7Q/CH0RCBBURHIhP3Yc/aLP7S/G7O73cBZWXcnlbMqL5w2r8yN060j2KorsnE6tCVWHl0jW14z2c4zWZEPPaMcwGGYkNscpi6AwqWNnPOTW/iE7wx0MmropKZs1MRhSM2TY79GFDU+fbahfeWbzhqrNSfdbdE8oTmH+2FOtavq3PTsfafaOU1xwdLnh7ld7uMxx9usl1ZMGaUHF9yZvBXmXHAQf6VqPGjh6t/pM/iLn7ld9UhFefb1gNqixY0N2t2XXl9Svrnjy+0BvEug/qujfUsTUMJ01VG1k/2jARw8O6OWO/k7KznBM4lIQhWDI0j67ox32hkNC8Kw2a7J8xKPbP2N/dESM8ObyGb/9/gnPX75mPm0ollC3DSaBrrCkxjI6hGxPiE5YvY48nzc4ifTHOccPc8Y7ljBveXnaEIoIfls5Kn3DApRShBBpgicbpIzu9Tl6NGA8MMy/rzj5ukRllsN/kTL61HPrq8CFLFh8WxJnKcPbGQPXo6JmtahYXnV8erzPX//iM+7deogiY7koKYqCNM0Yj3YZ9nZIVUJbVZxcnHC+XHI4OeLWR4/49P7nrMsNL16/4PsnJ/zT4zdUhUPaBNV6Lr8P1IVm/4FlsG9Io2J1Jlx8H2iXnjStefhz4fBOysF+wuW9jMtDR7Hw+DJu02KrsG+9ngK8CFFFekNF/0jj8shm6pm/DMyeKcqqZLleclQYRncd6dCycw+GqSJPoF15ZtOS6asN3RzcLc3Hdx7xf/wv/5piI/zbf/fvefb4FXeP7/PweML+3g7lesPrk0uevTxhLSX9nSFeNURV0UmJJxC1o8NSB9ARnFK0tTCbtdRpS1YrlFe0l4pqquhWhlISen04ulsz+dgwPnTsPupTn28oZjUSBaPUDQtgmyQFE1FZwPaErvUszwKrKwiVpbmquGwKmtKy9+mAwSQl7RmMi2yWJc0VnJ2uWbyqyX2GiSmJjOjZCVWomE0rXp9e0euNWBcblA7MpyveXFxxNd9Q6ZY3V1f87snvuJpdUBQ1by7PyPIeh7f3SPMK8YosTXF9gxlBtqtJMkHaBk9DHEO7dqwvE4qN5vRpieopVN8xutPjclwTEBSCeusElWyTA1GBqEFMQGkFYpGoCcETY9j2z1pHfQqXXctmD9KBxthA9IHYWoqVJxSKZJSSD0fMi4b/99e/YXpZUNbC/uEtJBWevnlGaDShMnRdQj+fUKyuePHknLOTS5xWiG8JpiW4irv3e9x5YAgSMVlCb6fHwfGQB3d32BtD211wuThjsW45P7E8/62inEeKxrNpNHaYYnoWkxuUVe86cfaDIkhvc2AlBmMcNvUo14L22BRszxEIVLNAtWkwPYMdRGymSK0h7VlsJuzs9pEePDl7zm+//Y5iXZMmOb1hynQ15+nJS3wpHO7tcP/hPvfvCPas5snjC05erOnair1J5OijhNsPUya3DVmesqkCZWfIx4aHH+V88WDIraGmpOBVSLhcB/rfKJbnnmYZtxEtcRhnSBKFzRUqFaR7pwD1tmWylV47jEtJUkeSQZt6tI1EUfgQQTpsDiZPEKdxPcf4OGd8lJP2ErQKQIUDan3Fi/mKcrmC2DFKBlQLy7OnS+bzgskBHH7Uo3e/x+FdzW5REOyG9bxBMs8Xv9J8/DfC4UPh4JbFojh9LZy+jmDXKFrmiyVdp6jyNau0Ru140tG22KrPDf09S29kGQ8dMe9wWUCSgGhBif6RBWiFcY60l5IPE/ojg6806cCSDBR126BHgZ17CZN7PfJdw2gn4+69Qw6Od5EElsWKxXJJsy5I4oxURYgtzkZSveT1Y6H5fYNWkXufGR78sqB3EMkPFYc7mrbVlJeaNO/x1/+bZfJxoOs6YttCanGJJkkD0XmKMOf7l5Fyrti0EHpCOhEWL2F+pvB1xmjYZ7LXJ3GWaVsSYktQHn2dAVrU+/JYG7am3Nf0xo7+bkoMmtGhp7zV4V1HOuk4/jzhq7/MufOJ5fCwx6OdXfZ7BxS+5fs3Db/7Tih8x4OPPPfua3w0iBgGLvDiQaBYanzQ/N3/ZbnzSHP+NLC8FHbuaPYfKg7ua3ojzfi+Yj2Db/+jJ+rIwacRlRiiBrcXCT3PbBl48z1cfatoKrAToRFhNhPyvYzbD8bs7Y6ZXxVcnW3YLBrEX/fq9QdtcTAmonWLUCNGY3NHb5QyGAeqssPmntEe3HkoPPxC2N8J7PqSNMzRrmMnW+PqEtO2HB7CnWPH6XNFVcHkS0syDJw8NgQPn/6lxSrF199HohV2PwbTF+wgoMeeLhPOnwa+/U0k5IHyKDIcRWgVSakImWW9pyhvR8oXsH6pCJeRxkJdGnbupAwPMrRVTK8q3rwoWF9GaO27oYzd9rjfVwniI01ZslnN6NUBpbfZWyKCKnvEVUn0FV4VrDaGxVXFt1drdNTs3lJ45fGxpasD6xqePKv49b8RygWE/9uw80ChR5HQCJ2JXJ0K334dUJnmo//dYG1kVbeUVWQmljIDdSAkdwTzZaQpA+tvNN25RR4ADyPJ33vGBwb9a03zyqIuNJ2kWNUHo6h8w/Rqw/SspVlZdFBoGkTdbItriB7aUqhWga7oSJVh0B9Ar8cVFbHUGKcxBrqk5fQqcv5tZPG6I+kJD6JluO9oRNN4xawQ5kXk5ctINdecXDjafU0tgU4CVxu4mgYuphGTGs6uEtIMFkUkqECyFsKepv83kB2D2YvMTyKvf6Oo5or0Y0N/Y0g+DtgHQm4E951C/9YSrnJyOyBzPazpiAGiF6xR2wZMUMT4Ng/YFmaETpAS2tLgGHB7fMSt8V2enUWe2JJOWnpOGE0s6WFgcek5fdXQXCr2bxuqThPbSK2F4BQVQr4v3Pt7qJfgh5Gzq0BRRZSJzDtYqYgdB7xSnBVC0mrqaKk7xclGcIcCD4UgMPs9vPp/hJNfB2KhGV1pyu8M6o5B/8qjDgJ6bJAswfYU/UHKwXif8Y6wO5zRG13CTgsitK0Q2x/5AEEQJSijSdOcg/EB9ye3mPUXNFQ0eoMbRLKBQRkoG8OitFht0LmljIaijNQ6Ql+oNaQTxeH/KZSXkemZsPyvkeJc6B0pLpeazcpgnBCTyEJ5TNDUAo1opI24taBew+aVojkxzL+FoBX2WNA7ge7K4GcGtbv1Gy6AeI9XHpdp9no7TAaGnVGPbCT4VUAq6PSNRGg7xFRoG9EDj+t7xArGOFKXokSo6w2dKWBo6CKsp8JybilQJH2h6Al1I4RGo0VIc6HwmuAFt+dZVYGX3ygW/whupNg9MsjCUJwrmiYS80BhWlSEKmqwGlGK6jms/z3Uv4cYDXZs2P9lxH0RUANPfCKYK0XsKUKraWdCNw3UZYeXgFGaVBu0BYxHlIDod3mffT8RAusUtgfKBjZFw+V8zV66ZLPa0JUdWkVwMPeBbipM3xi6qYX9wCoJ0ARipUm00BmoZhp7ImijWK+E6QWUC03vQFEOoIuydcjHGj2MtHh0ByoF0wM6oXgZOPuHyPK3imTPMvmZYTRRuAfQ7noYRPSpQfcVMje050K1iDTrQFXUrKsFvcZQ+5rOK9pKQb0dlPygHBYErRQGQ2xhtWx4fX5FRsLVVUEsIRWDaM+lNJwXkebc4t9YyGCJYMoAC6gHoJWBqcC5oGYK7w2kmvSOQh0IZSZo41GHYJyCoGgXBr0B4ww2BV9EmibS5pGwC10OTQfFVGFeRtpKiARMX3CVRaaa7izSbgS/hnpRc7Y4pVtrirZGuoS2isQqoIJg9M1qUEHwgi8iXSOIDjRSs9hsWK8qfOlRGmIeWCpP1W17/NlEMBNNTCL+KiJzwe6DjAPtKXRnEb2GZKJJJ2Ct0ISO+sKjjWDHgk4U4czQPdHEacSolsHQkYWMydGQ9F9CcSwEH7FJBDztm0gzV4Q0okPErwKcadozwa8ECmg2nqvVEiqNmEiepmhpaXyHjYLRN6OAVlRNQK2FXCWMDxMGewm+FopNS9M0hLwjDiNBhKYOuD3IB5r0tkU52MwV7RSyzyJmGGg7T/VGSLwhcQ6dKzzQnAjtm4BtgAeCDpruDJrvLPXUY/c8yb5ln10m9/Zw+wnNDJazmuV6SVEt2awCcmaIrSJ4oasjcRnxCyEugHr73nod6JXgEstwuK1vSgnbYSk/qgXkegLcG2Yc3BqSDQzzyzXz+RrvPSQQEkFFsLUm6kg7DAx7jrRz1FVgM22JzwKuEsKpRc4V3UqzKaEee2RtCK9yEjWmbxJsFYmtx144hn6I9DWq15G0YFd9hns7HN+f4O5kXJyuefb0JcV8Q3sGYW7RDcQYaOtAvQlIKVAadIC2jRTLjmoB4rc+DiVIDO/Sf/sezrIFFtBzDMd9hsM+bdvx5nTO5awCBG0Mvm2xC9BiaVpPaYR+Y3DKETeRbh5ov1ZkT3LctI8tE/wKZOWRMSQ6JW0GZKpP701CtrZkiUMrjZlY8mFObyel0gWb5Rz/KiX6PllvxMAbzOqC4lWkeB3RtcMpDVERN9AtBekiOipEoOsC5bxhfelpa6FtIr4F/Pvy374bBIlgjEEnCdY5ghfKZct6XtN2DbqnwES6mRDbiG+AxhKUpXitaUzH+qyiLjsGccw4HDAwe7iDPlal9Ecp+wc9ktRRr4WL0wWrqwW3kwP+9me/QpLA71/9jixJ+cVHP4NE+PbN90xP57w6rZj3PF2zYfF8xfx5weqqJkGhg0E6IbQg0WASjcaiWkUMga5uqTeKagP1OiDeYLRFqYAgN/oBgBKFjpq29CynJS4FqRTWaJTz+NYTTyOihFCA8RYjlpUJtKqh8iUusfT2euyPdxnoPXI7Yndnj0cPj/ns0R2s0Tx9ccp//i+/Ydmec/hgxP/6r/6aot7wTyffUC0KDvp73D4+RAfDfzn9A989OaGLS1xWcXVxSdc0uEzjnKZbC20ZUShcT5PkAkETloL4SBTBR6GtFL6MmGixxm07wxJ+GAUkCL4KlMuWzbIm72tiF4ktdBtFF0BvQMTi1xArIfoGsYL0IvQc2W6GVYooFXVYEySSBCHaHQajnNzlDKZzDm/vMprk/MUvv2B8OKS9qtjZG1AUFVVdg2gOxvvs5WP86jHni3PsuMKrmoOPhgwnQ/JRRrGomJ6sKC4ioYFoIjF2dJWh2wjSarSSbZJnBCMRgryfCyDXcwEFBCHUgXrRUsxbjNPoNKCNEDaKrjDYvsFmGqsVteroaHC5Ih+n2DTDYamLlkt/jpWC1A0QU3J2kfLsZBdLxqtXp+RJxldffsGD+/d5dXbG6fkbhrtDsIbnZ29oJGKdxjlF1hPYtHS2YXjomNzZ4fDuLbJRTlWvuHx9zvl3BfPXLXVd0yyFbhbBbK91khiatEPZAMFDFyFuq+AbPgCMUhg03UqYvWlJ9hzje4ZuBctXHZspRDRmIOR3YJA5jE7JxhaXJviNpZp5ivWGovD0Us3unUM+/eghd4/vsC43nJ495+z0jF7e41Z1xHKzpmwLLufnlL6iqEuW81dMpyvSLOXi6pJSGryNmDSyc9dx9/MRaRzj5yP2hhMOfr7H3Y/Pubq8ZLVwzF8GLtKAU4H+oSYZWrpFR9MExG/b4fF6SGpBIUREwDmLSx1SKmYvG/IjGH2WMn6g2PkYvDdY6xg+jOz/TDOeDMldHzfWNF3N9HFDXVZUa49Sml6SMNk95LOPv+LoYMLTk2e8PH/B6dk5TjuKsuL4/Jh0aNk0Ky7PL9nMN4RWY0jxUbGsNlyVK0Ii9PqGwY7DOsXqpGX9tOPgcJe7vxow+TTh8FPNYllycaull62QLjK6r8FoinmkmHqk1STO0nWBEOVGKiyCsYokMXQNVG86Ln8XcBLJe5qDTw27d3J6/R4HDx2TBznW7+KrHDXZsI5nrK7WeFpEgbMJKiaU647T8yvq0HI2m7LYFMwWK6pVxZuXFzw5ecboICOYwHK2oaxqUGCwSDBUXaCxDf1dxXgvg84yfeNpyiUha1lXHZdP+ozqDIa30HVB7tYcf6bQtsMODaurQPm6o7uIaG/QzuDDFnVilboBKNSgtNoiMFeR2Tct9dxz6/OMe18OGR306eUjJrtDxumQ6nzEqhKU1CRZQFRNiB6XGXq9FB0Vp+fn/Id/KOntpAiKdVFT1y2rckVQHcvZBT1vEVEUy0DdelQipNaRkNLW22HNYGhITEa11KxiSz5p6R2sqS5mPPl2QP/pHmk/Zd3VdJmwezelt29ZLluunlaUL1r0EmzUYLdzQcIH/YCtJThrIFjquWdedwwmCViDoFi+DpRPPT3XofQSvdvSyzdoFdGANYLODcnIoLvIul0ye3OJnEWcdsROaPwGOwn0DiHfjRhpKa8C7SxQrQIIBOtpaWk3QvCK1CesB5beUcQOA71dRa/vadYVS9+yWYI6S5nOrojDOZI5vLOcPSl58/WG8o3HdBrjFFHLhwiRt5DzKNvyNbWWpLB0laddw2YdCaFj9WxN8aZBsaZ3FDn4meewgxgEKgu1QkLEdy0+eNo2UFcVTdUQvaCiwjjNaOgYHWT09g1+HWkuG1Qd0RuFdIpgIMRAu46EEmZ1xKSKwwwODvskLiEUjq5QNK2nLaf4LrD2U1SomK16bJqUN78tufq2xqwUPWvQVhFifIcDsn8KTu60wXnBr4Vi1uKGkNzR1NSsT2H1Chox6DQlGyjqmaY4j7RtR1N227DaBTrvCT5sofS1RhqDn0M3AzfQ+EKoLgLNTCFiMJkCo4hhW1YrJzSbjsvna8wgkA01Whu6wjL/J8fs24ZNucIeVYw+6Rjfc1gnLJ7WrJ63+KlgMVuco1aIlx/VAj9qjcctRgajFXlioBDKy47dTwyTjxX5XY/+XaA4SYh1wuZMU6Udy1dCcarxbUcsw7sM01iNtXYrlIWuEtoLz/QyIApE1NYytMb19RbOphUajTIWhVBX0Cwrpt/WqFBRFBab9mhLh6oj0gX0oOPg85T9BzmLpy3l65o4hUw5EqtR5kPE/B+HyoogCMYolGikgOYsEBaQfmKJY2FwLOwepvTTlLpuuHxSsngZocxItCU1EZW8Bd4olNaQCG4vkn4SUD7QLCK+li0OsaewmUaCoS0MsTboVKPMFjlmUkVXaspT4XXRbQemvzLs/QvL3j3LcpXgBy3WaupzYf77js33Haw1qTNoc537vEND/RmUGaXBREXoIFzB5nFk0Y80SvANjI+F3Ylncd4izzp0Ar2dBC2OtC/ogUYyda0IwEaSYWSw70ldIFSB2GyZJCQQUbQbg5kaYrO1ghiEUIJpHE6ZLcgqQpoKe7c9g6OacglyBpupYfV9pJvVzL/xdOdgg8LmGpFIDLJlnPw5OMG3s1KlFEYgLIXpNzWry4YuCUgubC4aNvdShmPDrU9TdBe5MJ5mFohaoSy4Q0Nyx2ByBbUQloFyBW2q6I+3/cHQQLWCegOiFNkDBcNIIwG5EjhRdBWI1gzvasYPLPf+IqM/VqznBa+/q1m/6uimgl9AWEKYg412225TW4ve3rc/lzR1AzenBaQVNq9amteBmAToC9Nv4fLY8eivhhx+1OPg5wFxns25IB6ykSI5NnCkkCyiGiFcRcIUDIYstSSJJhIh21qcDCPmdkTtCs5D3NHERFHl28pu547l1mcJO7ct61nHy/9a8OIfNjQXgvMOXWl0UCTWYNMtryheQ+a1+jNZY/K2NXStNK6ZXSoqrNfb+ruONJ0wuwqYWNN1itEdx8HPHTufb6Foo1GOUpbZvGUx71DDjp2vhKMM0sJRXTi6lcINAvYjIU4Ua9exqAKxsYxtTnrHIROh/cLThUBvpElzxdVlzdkfKs6/rilfCLrZTq1s1Dfwjj9ioyn58yxAa711hFHekaK2uQFkGMDStREdhGYB838KBF9xWAq79xymr9BGoTOIS6E7CVSzjnjQ0cuFbKKZDB1RW2Jusb2In3SshoGiichMoaYG4x3aOmIacQNBxYgPkauXnsvvGi7/0NC+grRJSYwhTTTWbkWPsuUHIKDR767zj+HyqjfYkbecIecc/cHgPWUm/hBduX12S2KKQbbNyLAdcjIEd6jJJhqTbZ2NdRpaRVhF6jIQrGBHwt6h4pNHKZ9/OuBwP6dp4PvnFb97UjAtWhJnSKMlLKHdQOMj2Ih2Ed8J1TzSnEfiTLCNIrEWa7YkLaUUot7T9v4YZ6jtOsrNhq7rftwUlW3z820o/GOcobdKUKCc4KygOqGZRVbzyPx7QZnr9gIRYyHPDUY0oVZUlXCZQvszoe81+pGwXmie/qeab39dUZaeye2UvB/YzFs2V55ms6W72FThgxBqcFHTN4bUKbQLAPjwNtT9dHKnlCJ4//69m9xhpRTGmHdg6RsUzQ8VcJM8FQQftq2neI2+2jIDt0WHc9ukRjz4DqKCwa5ictsyGBnaRjG/8Mwvt+jwrK+xFro20DVC6K5hvNexXMK2d+GM3jLKrr3bO8LmT6e3W+sVIV7T5tSPydNvT/4D2usPoPQ38dbX1qDfBg31wffjDdLk2+aTb6Fp3xMmrVEkqd4OaIJcj67UNZP0h3xF1HsHF+Vmaqf4kwRS2e77pi/4k5yhn6bTqA/NTN53lm5G0R8Tnd/tV4HREK95PErfYKLeYDu+lU1+tO4PuA9/Lm1WfbjvD2sBrfnvY+He4BurHzJS5Kd45AqsVSQ57wSP10RHYVuNvmN/yvtI9EMjVDfu9f/gfoH/D/Bia3HR6d4QAAAAAElFTkSuQmCC';
-const FAVICON_URI = 'data:image/png;base64,' + FAVICON_B64;
-
 const PAGE = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pokédex Hall</title>
-<link rel="icon" type="image/png" href="${FAVICON_URI}">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   :root { --bg:#14151f; --panel:#1f2133; --panel2:#2b2d42; --ink:#f1f1f5; --mute:#8d99ae; --line:#0b0c12; --gold:#f8c030; --green:#22c55e; --red:#ef4444; }
@@ -3857,6 +3953,7 @@ const PAGE = `<!DOCTYPE html>
   // ---------- load ----------
   async function load() {
     try {
+      if (document.hidden && data) return;
       var res = await fetch('/api/pokedex');
       var d = await res.json();
       var json = JSON.stringify([d.users, d.max]);
@@ -4076,6 +4173,7 @@ const PAGE = `<!DOCTYPE html>
   renderCommands();
   load().then(restoreLogin);
   setInterval(load, 30000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { load(); if (playTimer) pollPlay(); } });
 </script>
 </body>
 </html>`;
