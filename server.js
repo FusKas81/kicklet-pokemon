@@ -139,7 +139,7 @@
 //  1. Open in your browser (logged in to Kick with the account that should write the chat messages):
 //        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET
 //     To also allow Channel Points rewards use this one instead:
-//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET&rewards=1
+//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET&rewards=1rewards=1
 //  2. Kick asks you to allow the app. Accept. You come back to a page saying "Kick connected!".
 //     The bot saved its access tokens in the database and renews them by itself, and it subscribed to chat events
 //     (and to reward events when you used &rewards=1).
@@ -644,7 +644,7 @@ app.get('/kick-login', checkSecret, (req, res) => {
     `https://id.kick.com/oauth/authorize?response_type=code` +
     `&client_id=${process.env.KICK_CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&scope=${encodeURIComponent('chat:write user:read events:subscribe' + (req.query.rewards ? ' channel:rewards:read channel:rewards:write' : ''))}` +
+    `&scope=${encodeURIComponent('chat:write user:read events:subscribe channel:rewards:read channel:rewards:write')}` +
     `&code_challenge=${challenge}` +
     `&code_challenge_method=S256` +
     `&state=${state}`;
