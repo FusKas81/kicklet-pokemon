@@ -138,11 +138,13 @@
 // -------------------------------------------------------------------
 //  1. Open in your browser (logged in to Kick with the account that should write the chat messages):
 //        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET
-//     To also allow Channel Points rewards use this one instead:
-//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET&rewards=1rewards=1
-//  2. Kick asks you to allow the app. Accept. You come back to a page saying "Kick connected!".
+//     (The bot always asks for the chat AND Channel Points permissions; an old "&rewards=1" at the end is harmless.)
+//  2. Kick asks you to allow the app. Accept all permissions. You come back to a page saying "Kick connected!".
 //     The bot saved its access tokens in the database and renews them by itself, and it subscribed to chat events
-//     (and to reward events when you used &rewards=1).
+//     and to Channel Points events. In the Render log look for the line "Permissions granted:" - it must list
+//     chat:write, user:read, events:subscribe, channel:rewards:read and channel:rewards:write.
+//     If rewards are missing, Kick is re-using an old approval: on Kick open Settings -> connected/authorized apps,
+//     remove this app, then repeat step 1.
 //  3. Test: type  !help  in your chat. The bot must answer. If not, see "PROBLEMS" at the end.
 //  4. Repeat step 1 only if you change the Kick app, the redirect URL or the scopes, or if the bot stops answering
 //     after a long break.
@@ -150,15 +152,16 @@
 // -------------------------------------------------------------------
 // PART 8 - CHANNEL POINTS REWARD "Random Pokemon" (optional)
 // -------------------------------------------------------------------
-//  1. You must have used the "&rewards=1" link in Part 7.
+//  1. The Part 7 login must have granted channel:rewards:write (check the "Permissions granted:" log line).
 //  2. On Kick open your Creator Dashboard -> Channel Points -> Rewards -> create a reward titled exactly the same as
 //     REWARD_NAME ("Random Pokemon" by default) with the price you like. Leave "require user input" off.
 //  3. When a viewer redeems it the bot gives a random Pokémon missing from their Pokédex and announces it in chat.
 //     It is paid once per redemption even when Kick sends two events (pending, then accepted).
 //  4. When the Pokémon is delivered the bot approves the redemption on Kick by itself (the queue stays clean). If it can't be
 //     given (party full, or the viewer already has the whole Pokédex) the bot rejects the redemption, which gives the
-//     Channel Points back, and says so in chat. This needs the &rewards=1 login of Part 7 (permission
-//     channel:rewards:write) and a reward that waits in Kick's redemption queue (do NOT turn on "skip redemption queue").
+//     Channel Points back, and says so in chat. This needs the Part 7 login with
+//     the channel:rewards:write permission and a reward that waits in Kick's redemption queue: keep the reward option
+//     "Skip reward request queue" OFF (when it is on Kick completes the redemption itself and it can no longer be refunded).
 //     If Kick refuses the refund the bot says a mod can refund it, and the reason is written in the Render logs.
 //
 // -------------------------------------------------------------------
@@ -204,6 +207,9 @@
 //    changed its signature scheme (emergency: KICK_WEBHOOK_VERIFY=off, then tell the developer). (2) The free server
 //    was asleep: check the "Awake" cron job. (3) Redo Part 7. (4) The Kick account may be blocked by slow mode: make
 //    it a moderator.
+//  - Channel Points not refunded (log shows "401 Unauthorized" or "Could not reject"): the bot's Kick login lacks the
+//    channel:rewards:write permission (look for the "Permissions granted:" line after logging in) - remove the app in Kick
+//    Settings -> connected apps and log in again (Part 7); and keep "Skip reward request queue" OFF on the reward.
 //  - Nothing spawns: the "Spawn" cron job shows an error, or BOT_SECRET differs, or the previous Pokémon can still be caught.
 //  - Overlay empty: normal when nothing is happening. Open https://YOUR_APP.onrender.com/battle-data to see the raw data.
 //  - Emotes show as plain text [emote:...]: that emote does not exist on your channel (Part 5c).
@@ -289,7 +295,7 @@ app.use((req, res, next) => {
       res.setHeader('Vary', 'Accept-Encoding');
       res.setHeader('Content-Encoding', useBr ? 'br' : 'gzip');
       return plainSend.call(this, useBr ? entry.br : entry.gz);
-    } catch (e) {
+    } catch {
       return plainSend.call(this, body);
     }
   };
@@ -450,7 +456,7 @@ function flushConfirmed(maxMs = 3000) {
 async function flushAndExit(signal) {
   console.log(`${signal}: saving game state before shutdown...`);
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  try { await flushDB(); } catch (e) {}
+  try { await flushDB(); } catch { /* shutting down: nothing more to do */ }
   process.exit(0);
 }
 process.on('SIGTERM', () => flushAndExit('SIGTERM'));
@@ -629,12 +635,11 @@ async function subscribeKickRewardWebhook(token) {
     );
     console.log('✅ Subscribed to Kick channel.reward.redemption.updated webhook!');
   } catch (err) {
-    console.error('⚠️ Rewards webhook subscription notice (log in again with /kick-login?secret=...&rewards=1):', err.response?.data || err.message);
+    console.error('⚠️ Rewards webhook subscription notice (log in again with /kick-login?secret=...):', err.response?.data || err.message);
   }
 }
 
-// Step A: Visit /kick-login?secret=mypassword once to authorize
-// (add &rewards=1 to also allow Channel Points rewards)
+// Step A: Visit /kick-login?secret=<BOT_SECRET> once to authorize (chat + Channel Points permissions)
 app.get('/kick-login', checkSecret, (req, res) => {
   tempPkceVerifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(tempPkceVerifier).digest('base64url');
@@ -658,7 +663,7 @@ app.get('/kick-callback', async (req, res) => {
     const code = req.query.code;
     const verifier = tempPkceVerifier;
     if (typeof code !== 'string' || !verifier || !tempOauthState || req.query.state !== tempOauthState) {
-      return res.send('❌ Missing code or session expired. Open /kick-login?secret=mypassword again.');
+      return res.send('❌ Missing code or session expired. Open /kick-login?secret=YOUR_BOT_SECRET again.');
     }
 
     const params = new URLSearchParams({
@@ -686,7 +691,7 @@ app.get('/kick-callback', async (req, res) => {
     } finally { unlockAuth(); }
     tempPkceVerifier = null; tempOauthState = null; // one use only
     console.log('🔑 Kick login done. Permissions granted:', data.scope || '(Kick did not say)');
-    if (!String(data.scope || '').includes('channel:rewards:write')) console.warn('⚠️ Channel Points refunds will NOT work: log in with /kick-login?secret=...&rewards=1');
+    if (!String(data.scope || '').includes('channel:rewards:write')) console.warn('⚠️ Channel Points refunds will NOT work: log in again with /kick-login?secret=... (if the permission is still missing, remove the app under Kick Settings -> connected apps first)');
     await subscribeKickChatWebhook(data.access_token);
     await subscribeKickRewardWebhook(data.access_token);
 
@@ -1930,7 +1935,7 @@ function nextSpawnText(db, spawn) {
 }
 
 // Settles a pending redemption on Kick (needs the channel:rewards:write permission, i.e.
-// /kick-login?secret=...&rewards=1): 'accept' = approve it (points stay spent), 'reject' = refund the points.
+// /kick-login?secret=...): 'accept' = approve it (points stay spent), 'reject' = refund the points.
 // Returns true when Kick took it.
 async function settleRedemption(token, redemptionId, action) {
   if (!token) { console.error(`❌ Cannot ${action} redemption ${redemptionId}: the bot has no Kick login token`); return false; }
@@ -2603,7 +2608,7 @@ app.get('/battle-data', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (req.query.h === hash) return res.json({ same: true, now: Date.now() });
     res.json({ ...payload, hash, now: Date.now() });
-  } catch (e) {
+  } catch {
     res.json({ active: false, battle: null, spawn: null, result: null, now: Date.now() });
   }
 });
@@ -3418,7 +3423,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
         await saveDB(db);
       }
       res.json({ user });
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: 'failed' });
     } finally {
       if (unlock) unlock();
@@ -3438,7 +3443,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
         await saveDB(db);
       }
       res.json({ ok: true });
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: 'failed' });
     } finally {
       if (unlock) unlock();
@@ -4680,4 +4685,13 @@ async function runCommands(user, steps) {
 registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runCommands, MOVE_LIMIT_MS, GEN2, MAX_POKEMON_ID, webLogins, crypto });
 
 const PORT = process.env.PORT || 3000;
+// Last line of defence: a bad request (for example broken JSON) gets a short answer instead of a stack trace, and a stray
+// error somewhere never takes the whole bot down (Node would otherwise exit and Render would restart it).
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  if (res.headersSent) return;
+  res.status(err && err.status >= 400 && err.status < 500 ? err.status : 500).type('text').send('Bad request');
+});
+process.on('unhandledRejection', (reason) => console.error('❌ Unhandled promise rejection:', reason && reason.message ? reason.message : reason));
+process.on('uncaughtException', (err) => console.error('❌ Uncaught exception:', err && err.stack ? err.stack : err));
+
 app.listen(PORT, '0.0.0.0', () => console.log(`Bot online on port ${PORT}!`));
