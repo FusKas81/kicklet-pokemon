@@ -3269,7 +3269,7 @@ const PAGE = `<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>POKÉDEX HALL</h1>
+  <h1>POKÉDEX HALL - KickDROPS_24h</h1>
   <div class="sub">Every Pokémon caught in the stream, live!</div>
   <div class="stats" id="stats"></div>
 </header>
