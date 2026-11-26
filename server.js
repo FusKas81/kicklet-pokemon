@@ -3288,7 +3288,8 @@ const PAGE = `<!DOCTYPE html>
   h2 { font-size:12px; color:var(--gold); margin-bottom:12px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
 
   /* ---------- three equal columns: catches / fight wins / chat commands ---------- */
-  .boards { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; align-items:stretch; }
+  .boards { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; align-items:stretch; }
+  @media (max-width:1400px) { .boards { grid-template-columns:repeat(2, minmax(0,1fr)); } }
   @media (max-width:1050px) { .boards { grid-template-columns:1fr; } }
   .lb-wrap { position:relative; overflow:hidden; background:var(--panel); border:5px solid var(--line); border-radius:12px; padding:14px; height:660px; display:flex; flex-direction:column; }
   @media (max-width:1050px) { .lb-wrap { height:auto; } }
@@ -3458,6 +3459,10 @@ const PAGE = `<!DOCTYPE html>
     <div class="lb-wrap">
       <div class="lb-title">⚔️ TOP 10<br>MOST FIGHT WINS</div>
       <div class="lb-list" id="lb2"></div>
+    </div>
+    <div class="lb-wrap">
+      <div class="lb-title">✨ TOP 10<br>MOST SHINY CAUGHT</div>
+      <div class="lb-list" id="lb3"></div>
     </div>
     <div class="lb-wrap">
       <div class="lb-title">💬 ALL CHAT COMMANDS<br><span style="font-size:7px;color:var(--mute)">HOVER A COMMAND TO SEE HOW IT WORKS</span></div>
@@ -3944,7 +3949,10 @@ const PAGE = `<!DOCTYPE html>
     var byWins = data.users.filter(function (u) { return u.name !== FEATURED && u.battleWins > 0; })
       .sort(function (a, b) { return b.battleWins - a.battleWins || b.totalCaught - a.totalCaught; });
     renderBoard('lb', byCatch.slice(0, 10), function (u) { return u.totalCaught; });
+    var byShiny = data.users.filter(function (u) { return u.name !== FEATURED && u.shinies.length > 0; })
+      .sort(function (a, b) { return b.shinies.length - a.shinies.length || b.totalCaught - a.totalCaught; });
     renderBoard('lb2', byWins.slice(0, 10), function (u) { return u.battleWins; });
+    renderBoard('lb3', byShiny.slice(0, 10), function (u) { return u.shinies.length; });
   }
 
   function goToTrainer(name) {
