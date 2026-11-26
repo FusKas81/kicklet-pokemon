@@ -1,4 +1,215 @@
 // ===================================================================
+// SETUP GUIDE: HOW TO RUN THIS BOT ON ANOTHER KICK.COM CHANNEL
+// ===================================================================
+// This file is the whole project: the chat bot, the Pokédex website (/pokedex) and the OBS overlay (/overlay).
+// Follow the parts in order. Everything used here has a free plan. Time needed: about 45 minutes the first time.
+// Words in CAPITALS (YOUR_APP, YOUR_SECRET, ...) are things you replace with your own values.
+//
+// WHAT YOU NEED
+//   - A Kick account (the streamer's) with two-factor authentication turned on (Kick requires it for developer apps)
+//   - A free GitHub account        (holds the code so Render can run it)
+//   - A free Render account        (runs the bot 24/7, gives you the web address)       https://render.com
+//   - A free MongoDB Atlas account (database where Pokémon, parties and Pokédexes are saved)  https://www.mongodb.com/atlas
+//   - A free cron-job.org account  (calls the bot every 5 minutes to spawn Pokémon and keep it awake)
+//   - OBS Studio (or any streaming software that has a "Browser Source")
+//
+// HOW IT WORKS (so the steps make sense)
+//   Chat message on Kick  ->  Kick sends it to YOUR_APP.onrender.com/kick-webhook  ->  the bot runs the !command
+//   ->  the bot answers in chat through the Kick API.  Pokémon spawn when cron-job.org opens /spawn every 5 minutes.
+//   Viewers see the spawn on the OBS overlay (/overlay) and browse everything on the website (/pokedex).
+//
+// -------------------------------------------------------------------
+// PART 1 - DATABASE (MongoDB Atlas)
+// -------------------------------------------------------------------
+//  1. Create an account at mongodb.com/atlas and create a FREE cluster ("M0" / Free). Any region is fine.
+//  2. Left menu "Database Access" -> "Add New Database User". Choose a username and a password. Use only letters and
+//     numbers in the password (symbols such as @ : / ? # break the connection address). Give it "Read and write to any
+//     database". Write both down.
+//  3. Left menu "Network Access" -> "Add IP Address" -> "ALLOW ACCESS FROM ANYWHERE" (0.0.0.0/0) -> Confirm.
+//     (Render's free plan has no fixed IP address, so Atlas must accept connections from anywhere. The user and
+//     password still protect it.)
+//  4. "Database" -> your cluster -> "Connect" -> "Drivers" -> copy the connection string. It looks like:
+//        mongodb+srv://USERNAME:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+//     Replace <password> with your real password (remove the < >). Optionally put a database name after the "/",
+//     for example ...mongodb.net/pokemonbot?retryWrites=...   This whole text is your MONGO_URI (used in Part 4).
+//     The bot creates the collection by itself, you do not create tables.
+//
+// -------------------------------------------------------------------
+// PART 2 - KICK DEVELOPER APP (lets the bot read chat and write in chat)
+// -------------------------------------------------------------------
+// You must do Part 3 (Render) first to know your web address, OR choose the Render service name now: the address will be
+// https://YOUR_APP.onrender.com  (YOUR_APP = the service name you pick in Part 3). Use the same name in both places.
+//  1. On kick.com log in with the account that owns the channel. Open Settings -> "Developer" tab. Turn on
+//     two-factor authentication first if Kick asks for it.
+//  2. Click "Create application" and fill in:
+//        Name ............ anything (for example "Pokemon Bot")
+//        Redirect URL .... https://YOUR_APP.onrender.com/kick-callback      (must match exactly, no trailing slash)
+//        Enable webhooks . ON
+//        Webhook URL ..... https://YOUR_APP.onrender.com/kick-webhook
+//  3. Save. Kick shows a Client ID and a Client Secret. Copy both (the secret may only be shown once).
+//     They become KICK_CLIENT_ID and KICK_CLIENT_SECRET.
+//  4. You also need KICK_BROADCASTER_ID: the NUMBER that identifies the channel owner's account (not the name).
+//     Ways to find it:
+//        a) In a browser, while logged in to Kick, open  https://kick.com/api/v2/channels/YOUR_CHANNEL_NAME
+//           and look for  "user_id": 1234567  (the number next to "user_id", NOT the "id" of the channel).
+//        b) Or finish Part 5 first, then ask the Kick API for the authorized user:  GET https://api.kick.com/public/v1/users
+//           with the header  Authorization: Bearer ACCESS_TOKEN  (the "user_id" in the answer is the number).
+//     If Kick changes these pages, search "Kick API get user id" in the official Kick developer docs (docs.kick.com).
+//  5. Which account writes the chat messages? The account you log in with in Part 5. Using the streamer's account is the
+//     simplest (messages appear as the streamer). If you prefer a separate bot account, authorize with that account in
+//     Part 5, but KICK_BROADCASTER_ID must still be the STREAMER's id, and the bot account should be a moderator of the
+//     channel so it is never blocked by slow mode / follower-only mode.
+//
+// -------------------------------------------------------------------
+// PART 3 - THE CODE ON GITHUB + THE SERVER ON RENDER
+// -------------------------------------------------------------------
+//  1. On github.com create a new repository (can be private). Upload two files to the root of it:
+//        server.js      (this file)
+//        package.json   (create it with exactly this content):
+//             {
+//               "name": "kick-pokemon-bot",
+//               "version": "1.0.0",
+//               "type": "module",
+//               "main": "server.js",
+//               "scripts": { "start": "node server.js" },
+//               "engines": { "node": ">=18" },
+//               "dependencies": { "axios": "^1.7.0", "express": "^4.19.0", "mongoose": "^8.0.0" }
+//             }
+//     ("type": "module" is required: the file uses import statements.)
+//  2. On render.com: "New +" -> "Web Service" -> connect your GitHub account -> pick the repository.
+//        Name ............. YOUR_APP  (this becomes https://YOUR_APP.onrender.com, lowercase, no spaces)
+//        Runtime .......... Node
+//        Build Command .... npm install
+//        Start Command .... npm start        (or: node server.js)
+//        Instance type .... Free
+//  3. Before the first deploy (or afterwards under the service's "Environment" tab) add the variables of Part 4.
+//  4. Every time you change server.js on GitHub (commit), Render rebuilds automatically ("Auto-Deploy").
+//     The free plan sleeps after 15 minutes without visits: Part 6 fixes that.
+//
+// -------------------------------------------------------------------
+// PART 4 - ENVIRONMENT VARIABLES (Render -> your service -> Environment)
+// -------------------------------------------------------------------
+//   MONGO_URI ............. the MongoDB connection string from Part 1 (required, the bot refuses to start without it)
+//   KICK_CLIENT_ID ........ from the Kick developer app (Part 2)
+//   KICK_CLIENT_SECRET .... from the Kick developer app (Part 2)
+//   KICK_BROADCASTER_ID ... the number from Part 2, step 4. This account is also treated as moderator/broadcaster.
+//   BOT_SECRET ............ a password YOU invent (long, random, letters and numbers). It protects /kick-login and /spawn.
+//                           If it is missing, those two addresses stay locked. Never share it or post links containing it.
+//   SITE_URL .............. https://YOUR_APP.onrender.com   (no trailing slash). Used for the login redirect and the links
+//                           the bot writes in chat. Without it the bot would use the original author's address.
+//   PORT .................. do NOT set it, Render sets it by itself.
+//   ASSET_BASE ............ optional (CDN for the site's CSS/JS, saves bandwidth). Leave empty unless you know what it is.
+//   KICK_WEBHOOK_VERIFY ... optional. Leave empty. Setting it to "off" disables the Kick signature check (emergency only:
+//                           it lets anybody send fake chat events).
+//
+// -------------------------------------------------------------------
+// PART 5 - CHANGES INSIDE THIS FILE FOR YOUR CHANNEL
+// -------------------------------------------------------------------
+// Use the search of your editor (GitHub's web editor works: open the file, pencil icon, Ctrl+F).
+//  a) The example trainer "fuskas". It is a bot-controlled trainer that anybody can battle and trade with, shown on top of
+//     the website. To rename it, replace every  fuskas  in this file with your own lowercase name (letters/numbers
+//     only, it must not be the name of a real viewer). Do the replace over the WHOLE file: the website code is inside
+//     this file too. Spots that matter: AUTO_TRAINER, maxPartyFor, FEATURED (website), the texts "@fuskas" and the
+//     "🤖@fuskas" helper (search "botify" / "addBotEmote").
+//  b) The website title: search  POKÉDEX HALL - KickDROPS_24h  and write your own.
+//  c) Chat emotes: texts like [emote:5756671:GIGACHAD] are Kick emotes of the original channel, in the form
+//     [emote:NUMBER:name]. Emotes only appear if they exist on your channel or are global Kick emotes. Replace each with
+//     an emote of your channel (type an emote in chat and look at the number in the chat message info), or simply
+//     delete the whole [emote:...] text. Search for  [emote:  to find them all.
+//  d) The Channel Points reward name and price: REWARD_NAME ('Random Pokemon') and REWARD_COST in section 2. The reward
+//     you create on Kick (Part 8) must have exactly the same title as REWARD_NAME (upper/lower case does not matter).
+//  e) Game settings in section 2 (all optional): MAX_INVENTORY (party size), MAX_CATCH_TRIES, CATCH_WINDOW_MS (seconds a
+//     Pokémon can be caught), SPAWN_CMD_COOLDOWN_MS (!spawn cooldown, subscribers/mods), SPAWN_INTERVAL_MINUTES (only the text shown in
+//     chat: keep it equal to your cron-job schedule from Part 6).
+//  f) Commit the changes on GitHub, wait for Render to show "Live" (green).
+//
+// -------------------------------------------------------------------
+// PART 6 - CRON JOBS (automatic spawns + keeping the free server awake) on cron-job.org
+// -------------------------------------------------------------------
+//  Create two jobs ("CREATE CRONJOB"), both with method GET:
+//   1) Spawn:  URL  https://YOUR_APP.onrender.com/spawn?secret=YOUR_BOT_SECRET   Schedule: every 5 minutes
+//   2) Awake:  URL  https://YOUR_APP.onrender.com/ping                           Schedule: every 5 minutes (or 10)
+//  YOUR_BOT_SECRET is the BOT_SECRET value of Part 4. Without job 2 the free Render server falls asleep and the bot
+//  stops hearing chat. In job 1 under "Advanced" you may set a timeout of 30 s. If the secret is wrong, the job shows
+//  "401 Unauthorized". The spawn is skipped by design when a Pokémon can still be caught or a viewer used !spawn recently.
+//
+// -------------------------------------------------------------------
+// PART 7 - CONNECT THE BOT TO KICK (one time)
+// -------------------------------------------------------------------
+//  1. Open in your browser (logged in to Kick with the account that should write the chat messages):
+//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET
+//     To also allow Channel Points rewards use this one instead:
+//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET&rewards=1
+//  2. Kick asks you to allow the app. Accept. You come back to a page saying "Kick connected!".
+//     The bot saved its access tokens in the database and renews them by itself, and it subscribed to chat events
+//     (and to reward events when you used &rewards=1).
+//  3. Test: type  !help  in your chat. The bot must answer. If not, see "PROBLEMS" at the end.
+//  4. Repeat step 1 only if you change the Kick app, the redirect URL or the scopes, or if the bot stops answering
+//     after a long break.
+//
+// -------------------------------------------------------------------
+// PART 8 - CHANNEL POINTS REWARD "Random Pokemon" (optional)
+// -------------------------------------------------------------------
+//  1. You must have used the "&rewards=1" link in Part 7.
+//  2. On Kick open your Creator Dashboard -> Channel Points -> Rewards -> create a reward titled exactly the same as
+//     REWARD_NAME ("Random Pokemon" by default) with the price you like. Leave "require user input" off.
+//  3. When a viewer redeems it the bot gives a random Pokémon missing from their Pokédex and announces it in chat.
+//     It is paid once per redemption even when Kick sends two events (pending, then accepted).
+//
+// -------------------------------------------------------------------
+// PART 9 - OBS OVERLAY (shows the wild Pokémon and the battles)
+// -------------------------------------------------------------------
+//  1. In OBS: Sources "+" -> "Browser" -> name it "Pokemon overlay".
+//  2. URL:    https://YOUR_APP.onrender.com/overlay
+//     Width 1920, Height 1080 (your canvas size). Leave "Custom CSS" with only the default text or empty
+//     (the background is already transparent). Do NOT tick "Shutdown source when not visible" if you want the
+//     spawn to be ready the moment you switch scenes; tick "Refresh browser when scene becomes active" if the picture ever
+//     looks stuck.
+//  3. Put the source on top of your game/camera. The wild Pokémon card appears at the top centre when a spawn happens and
+//     the battle screen appears while two trainers fight. Move/scale it with the red box in OBS.
+//  4. Test without waiting: type !spawn in chat (owner, moderators and subscribers only, 10 minute cooldown per user), or open
+//     the /spawn link of Part 6 in a browser.
+//
+// -------------------------------------------------------------------
+// PART 10 - THE POKÉDEX WEBSITE
+// -------------------------------------------------------------------
+//  Address: https://YOUR_APP.onrender.com/pokedex  (put it in your Kick channel description / panels / a chat command).
+//  - Everybody sees the leaderboards (catches, battle wins, shiny), every trainer's Pokédex and party.
+//  - To manage a party (release, battle, trade) a viewer presses LOGIN, types their Kick username, gets a code like
+//    AB12CD and types  !verify AB12CD  in YOUR Kick chat from their own account. The site then logs them in for a year
+//    in that browser. They must have caught at least one Pokémon first.
+//  - Pokémon pictures are loaded from GitHub (PokeAPI sprites) and the pixel font from Google Fonts, so those two
+//    internet sites must be reachable by the viewer. Nothing else is needed.
+//
+// -------------------------------------------------------------------
+// COMMANDS FOR VIEWERS (also listed on the website): !catch, !party, !info <slot>, !release <slot>, !pokedex, !wild,
+// !spawncheck, !spawn, !leaderboard, !trade @user <slot>, !accept <slot>, !battle @user <slot>, !move <1-4>, !forfeit,
+// !help, !pokemon, !verify <code>. !spawn: owner, moderators and subscribers. Owner/moderators only (hidden): !shinyspawn, !givedex @user.
+//
+// -------------------------------------------------------------------
+// PROBLEMS AND HOW TO FIX THEM (always look at Render -> your service -> "Logs" first)
+// -------------------------------------------------------------------
+//  - Log says "MONGO_URI is missing": add the variable (Part 4), then Render -> "Manual Deploy".
+//  - Log says it cannot connect to MongoDB: wrong password in MONGO_URI, symbols in the password, or Network Access of
+//    Atlas does not allow 0.0.0.0/0 (Part 1, steps 2-3).
+//  - "Kick login failed" / page shows an error: redirect URL in the Kick app must be exactly
+//    https://YOUR_APP.onrender.com/kick-callback, Client ID/Secret must be copied without spaces, SITE_URL must be set.
+//  - Open /kick-login says "Unauthorized": the secret in the link is not the same as BOT_SECRET (or BOT_SECRET is missing).
+//  - Bot silent in chat: (1) check the log for "Rejected a webhook call": the Kick app "Webhook URL" is wrong or Kick
+//    changed its signature scheme (emergency: KICK_WEBHOOK_VERIFY=off, then tell the developer). (2) The free server
+//    was asleep: check the "Awake" cron job. (3) Redo Part 7. (4) The Kick account may be blocked by slow mode: make
+//    it a moderator.
+//  - Nothing spawns: the "Spawn" cron job shows an error, or BOT_SECRET differs, or the previous Pokémon can still be caught.
+//  - Overlay empty: normal when nothing is happening. Open https://YOUR_APP.onrender.com/battle-data to see the raw data.
+//  - Emotes show as plain text [emote:...]: that emote does not exist on your channel (Part 5c).
+//  - Everything resets: the database was changed or MONGO_URI points to another database/cluster.
+//  - Backups: in Atlas you can export the data ("Browse Collections" -> export). The whole game is one document with the id "main".
+//  - Costs: everything above is free; Render's free plan has monthly hour/bandwidth limits and slow first load after sleep.
+//  - Security: never publish MONGO_URI, KICK_CLIENT_SECRET or BOT_SECRET (or links containing the secret). If one leaks,
+//    change it (Atlas password / Kick app secret / BOT_SECRET) and update Render.
+// ===================================================================
+
+// ===================================================================
 // TABLE OF CONTENTS. server.js - Pokémon bot for Kick chat
 // Single-file Node (ESM) app: Express + Mongoose, deployed on Render. Sections, in file order:
 // 
@@ -270,8 +481,10 @@ const FLEE_GRACE_MS = 5000;
 function spawnExpiresAt(spawn) {
   return spawn.expiresAt || (spawn.spawnedAt + CATCH_WINDOW_MS);
 }
-const REDIRECT_URI = 'https://pokemon-fuskas.onrender.com/kick-callback';
-const POKEDEX_SITE = 'https://pokemon-fuskas.onrender.com/pokedex';
+// Public address of THIS server (no trailing slash). Set the SITE_URL environment variable on Render for your own stream.
+const SITE_URL = (process.env.SITE_URL || 'https://pokemon-fuskas.onrender.com').replace(/\/+$/, '');
+const REDIRECT_URI = `${SITE_URL}/kick-callback`;
+const POKEDEX_SITE = `${SITE_URL}/pokedex`;
 const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 
 // @fuskas is a bot-controlled example trainer: it accepts battle challenges and trade offers on its own.
@@ -1759,7 +1972,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
   if (cmd === 'verify') {
     const code = (args[0] || '').toUpperCase();
-    if (!code) return `@${user} To log in on the website, open https://pokemon-fuskas.onrender.com/pokedex, press LOGIN, then type the code it shows here, e.g. !verify AB12CD`;
+    if (!code) return `@${user} To log in on the website, open ${POKEDEX_SITE}, press LOGIN, then type the code it shows here, e.g. !verify AB12CD`;
     const entry = webLogins.get(code);
     if (!entry || entry.expires < Date.now() || entry.user !== user) return `@${user} That code is invalid or expired. Press LOGIN on the website to get a new one.`;
     entry.verified = true;
