@@ -37,7 +37,7 @@ app.use((req, res, next) => {
     try {
       const type = String(res.getHeader('Content-Type') || '');
       const accepts = String(req.headers['accept-encoding'] || '');
-      if (typeof body !== 'string' || body.length < 1024 || res.getHeader('Content-Encoding') || !/json|html|text/.test(type) || !/\b(br|gzip)\b/.test(accepts)) {
+      if (typeof body !== 'string' || body.length < 1024 || res.getHeader('Content-Encoding') || !/json|html|text|css|javascript/.test(type) || !/\b(br|gzip)\b/.test(accepts)) {
         return plainSend.call(this, body);
       }
       let entry = compressMemo.get(body);
@@ -47,7 +47,7 @@ app.use((req, res, next) => {
         if (compressMemo.size > 12) compressMemo.delete(compressMemo.keys().next().value);
       }
       const useBr = /\bbr\b/.test(accepts);
-      if (useBr && !entry.br) entry.br = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } });
+      if (useBr && !entry.br) entry.br = zlib.brotliCompressSync(Buffer.from(body), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } });
       if (!useBr && !entry.gz) entry.gz = zlib.gzipSync(body, { level: 6 });
       if (!res.getHeader('ETag')) res.setHeader('ETag', entry.etag);
       res.setHeader('Vary', 'Accept-Encoding');
@@ -103,7 +103,7 @@ const FLUSH_DELAY_MS = 250;
 // savedSigs remembers, as JSON text, what MongoDB already holds: one entry per game-state field and one per trainer
 // ('users.<name>'). A save compares the current state with it and writes just the differences with $set / $unset.
 const SAVED_FIELDS = ['activeSpawn', 'pendingTrades', 'activeBattles', 'kickAuth', 'lastBattleResult', 'lastAutoSpawnAt', 'autoSpawnBlockedUntil', 'webSessions', 'redeemedRewards'];
-const FULL_SAVE_EVERY_MS = 30 * 60 * 1000; // safety net: a complete save now and then
+const FULL_SAVE_EVERY_MS = 3 * 60 * 60 * 1000; // safety net: a complete save now and then
 let savedSigs = new Map();
 let lastFullSave = Date.now();
 const sigOf = (v) => JSON.stringify(v === undefined ? null : v);
@@ -256,6 +256,10 @@ const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
 const AUTO_TRAINER = 'fuskas';
 const AUTO_BATTLE_SLOT = 1;   // party slot that always fights (and can never be traded)
 const AUTO_MOVE = 4;          // move it always picks
+
+// Optional CDN for the site's CSS / JS files (see "Site assets" below), for example
+// https://cdn.jsdelivr.net/gh/USER/REPO@COMMIT/assets . Leave it empty and this server serves them itself.
+const ASSET_BASE = (process.env.ASSET_BASE || '').replace(/\/+$/, '');
 
 // Kick Channel Points reward: the redemption title must match this (not case sensitive)
 const REWARD_NAME = 'Random Pokemon';
@@ -2222,20 +2226,37 @@ app.post('/kick-webhook', async (req, res) => {
 });
 
 // Live JSON data for OBS Overlay
+async function buildBattlePayload() {
+  const db = await getDB();
+  const keys = Object.keys(db.activeBattles || {});
+  const activeKey = keys.find(k => db.activeBattles[k].p2Mon) || keys[0];
+  const payload = {
+    active: Boolean(activeKey),
+    battle: activeKey ? db.activeBattles[activeKey] : null,
+    spawn: db.activeSpawn || null,
+    result: db.lastBattleResult || null,
+    limits: { move: MOVE_LIMIT_MS, battle: BATTLE_LIMIT_MS }
+  };
+  const hash = crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex').slice(0, 12);
+  return { payload, hash };
+}
+
+// The overlay sends the fingerprint of what it already has (?h=...). With ?wait=1 the request is held (up to 25 s)
+// until something changes, so an idle overlay makes about 2 requests a minute instead of 60. Nothing changed -> only the clock.
 app.get('/battle-data', async (req, res) => {
   try {
-    const db = await getDB();
-    const keys = Object.keys(db.activeBattles || {});
-    const activeKey = keys.find(k => db.activeBattles[k].p2Mon) || keys[0];
-    const payload = {
-      active: Boolean(activeKey),
-      battle: activeKey ? db.activeBattles[activeKey] : null,
-      spawn: db.activeSpawn || null,
-      result: db.lastBattleResult || null,
-      limits: { move: MOVE_LIMIT_MS, battle: BATTLE_LIMIT_MS }
-    };
-    // The overlay sends the fingerprint of what it already has (?h=...). If nothing changed, only the clock is sent back.
-    const hash = crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex').slice(0, 12);
+    let { payload, hash } = await buildBattlePayload();
+    if (req.query.wait && req.query.h && req.query.h === hash) {
+      let closed = false;
+      req.on('close', () => { closed = true; });
+      const until = Date.now() + 25000;
+      while (!closed && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 500));
+        ({ payload, hash } = await buildBattlePayload());
+        if (hash !== req.query.h) break;
+      }
+      if (closed) return;
+    }
     res.set('Cache-Control', 'no-store');
     if (req.query.h === hash) return res.json({ same: true, now: Date.now() });
     res.json({ ...payload, hash, now: Date.now() });
@@ -2244,13 +2265,48 @@ app.get('/battle-data', async (req, res) => {
   }
 });
 
+// ---- Site assets -------------------------------------------------------------------------------------------------
+// The CSS and JavaScript of the site and the overlay are the biggest part of each page, so they are served as separate
+// files (/assets/<name>.css|js?v=<fingerprint>) that browsers keep for a year, and the page itself stays tiny.
+// If ASSET_BASE is set, the files are loaded from that CDN instead. They are checked against a fingerprint (integrity),
+// so an outdated CDN copy is refused and the file from this server is used: the site can never break from stale files.
+const ASSETS = new Map(); // 'site.css' -> { body, type, hash, integrity }
+
+function externalizePage(html, name) {
+  const add = (file, body, type) => {
+    const bytes = Buffer.from(body, 'utf8');
+    const hash = crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 10);
+    const integrity = 'sha384-' + crypto.createHash('sha384').update(bytes).digest('base64');
+    ASSETS.set(file, { body, type, hash, integrity });
+    return { file, hash, integrity, local: '/assets/' + file + '?v=' + hash };
+  };
+  return html
+    .replace(/<style>([\s\S]*?)<\/style>/, (m, css) => {
+      const a = add(name + '.css', css, 'text/css; charset=utf-8');
+      if (!ASSET_BASE) return `<link rel="stylesheet" href="${a.local}">`;
+      return `<link rel="stylesheet" href="${ASSET_BASE}/${a.file}?v=${a.hash}" integrity="${a.integrity}" crossorigin="anonymous" onerror="this.onerror=null;this.href='${a.local}'">`;
+    })
+    .replace(/<script>([\s\S]*?)<\/script>/, (m, js) => {
+      const a = add(name + '.js', js, 'application/javascript; charset=utf-8');
+      if (!ASSET_BASE) return `<script src="${a.local}"></script>`;
+      return `<script src="${ASSET_BASE}/${a.file}?v=${a.hash}" integrity="${a.integrity}" crossorigin="anonymous" onerror="var s=document.createElement('script');s.src='${a.local}';document.body.appendChild(s)"></script>`;
+    });
+}
+
+app.get('/assets/:file', (req, res) => {
+  const a = ASSETS.get(req.params.file);
+  if (!a) return res.sendStatus(404);
+  res.set('Cache-Control', req.query.v === a.hash ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.type(a.type).send(a.body);
+});
+
 // ===================================================================
 // 10. OBS OVERLAY PAGE
 // /overlay: Game Boy Color style page for OBS showing the current spawn and battle.
 // ===================================================================
 
-app.get('/overlay', (req, res) => {
-  res.send(`<!DOCTYPE html>
+const OVERLAY_HTML = externalizePage(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -2722,14 +2778,30 @@ app.get('/overlay', (req, res) => {
     }
     window.addEventListener('resize', layout);
 
-    var lastHash = '', lastData = null, pollMs = 1000;
+    var lastHash = '', lastData = null;
+    // Long polling: the server holds this request until something changes (up to ~25 s), so the overlay asks once per
+    // change instead of once per second.
     async function tick() {
       try {
-        var res = await fetch('/battle-data?h=' + lastHash);
-        var data = await res.json();
-        if (data.same && lastData) data = Object.assign({}, lastData, { now: data.now });
-        else { lastData = data; lastHash = data.hash || ''; }
-        if (data.now) offset = data.now - Date.now();
+        var ctl = new AbortController();
+        var killer = setTimeout(function () { ctl.abort(); }, 40000);
+        var res = await fetch('/battle-data?wait=1&h=' + lastHash, { signal: ctl.signal });
+        var d = await res.json();
+        clearTimeout(killer);
+        if (d.now) offset = d.now - Date.now();
+        if (d.same && lastData) return true; // nothing new
+        lastData = d;
+        lastHash = d.hash || '';
+        renderData();
+        return true;
+      } catch (e) { return false; }
+    }
+    // Draws the latest data. It also runs once a second with no network use, so timers, the "it fled" card and the
+    // battle result banner still change on time.
+    function renderData() {
+      var data = lastData;
+      if (!data) return;
+      try {
         if (data.limits) limits = data.limits;
 
         var frame = $('gbc-frame');
@@ -2771,19 +2843,19 @@ app.get('/overlay', (req, res) => {
         }
 
         layout();
-        // nothing on screen: ask less often
-        pollMs = (frame.style.display === 'none' && card.style.display === 'none') ? 2000 : 1000;
       } catch (e) {}
     }
-    function pollLoop() { tick().then(function () { setTimeout(pollLoop, pollMs); }); }
+    function pollLoop() { tick().then(function (ok) { setTimeout(pollLoop, ok ? 0 : 3000); }); }
+    setInterval(renderData, 1000);
     setInterval(renderTimer, 250);
     setInterval(renderSpawnTimer, 250);
     pollLoop();
   </script>
 </body>
 </html>
-</html>`);
-});
+</html>`, 'overlay');
+
+app.get('/overlay', (req, res) => { res.send(OVERLAY_HTML); });
 
 // ===================================================================
 // 11. BACKGROUND TIMER
@@ -3173,7 +3245,7 @@ function registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runComman
     }
   });
 
-  app.get(['/pokedex', '/pokedex/'], (req, res) => { res.set('Cache-Control', 'public, max-age=60'); res.type('html').send(PAGE); });
+  app.get(['/pokedex', '/pokedex/'], (req, res) => { res.set('Cache-Control', 'public, max-age=60'); res.type('html').send(SITE_HTML); });
 }
 
 // NOTE: this page is a plain template string. Do not use backticks or dollar-brace inside the script.
@@ -3898,6 +3970,31 @@ const PAGE = `<!DOCTYPE html>
     if (!u) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'block';
     el.innerHTML = '<h2><span>⭐ SEE ALL POKÉDEX HERE AND TRADE BY CLICKING POKEMON IN @fuskas PARTY</span></h2>' + cardHtml(u);
+    lazyScan();
+  }
+
+  // Pokémon pictures are only requested once they are really on screen (no pre-loading): they start without a src and
+  // get it the moment they scroll into view. Pictures scrolled out of view, or inside a scrolled-away list, load later.
+  var imgObserver = null;
+  function lazyScan() {
+    var imgs = document.querySelectorAll('img[data-src]');
+    if (!imgs.length) return;
+    if (!('IntersectionObserver' in window)) {
+      for (var k = 0; k < imgs.length; k++) { imgs[k].src = imgs[k].getAttribute('data-src'); imgs[k].removeAttribute('data-src'); }
+      return;
+    }
+    if (!imgObserver) {
+      imgObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (!en.isIntersecting) return;
+          var im = en.target;
+          imgObserver.unobserve(im);
+          var u = im.getAttribute('data-src');
+          if (u) { im.removeAttribute('data-src'); im.src = u; }
+        });
+      }, { rootMargin: '0px' });
+    }
+    for (var i = 0; i < imgs.length; i++) imgObserver.observe(imgs[i]);
   }
 
   function renderTrainers() {
@@ -3910,6 +4007,7 @@ const PAGE = `<!DOCTYPE html>
     if (!users.length) { $('trainers').innerHTML = '<div class="empty">' + (others.length ? 'NO TRAINER FOUND' : 'NOBODY HAS CAUGHT A POKÉMON YET!') + '</div>'; return; }
 
     $('trainers').innerHTML = users.map(cardHtml).join('');
+    lazyScan();
   }
 
   function cardHtml(u) {
@@ -3923,19 +4021,19 @@ const PAGE = `<!DOCTYPE html>
         var has = dex[sp.id] || held[sp.id];
         var cls = 'cell' + (has ? '' : ' no') + (held[sp.id] ? ' held' : '');
         var attrs = has ? ' data-dex="' + sp.id + '" data-kind="dex" data-user="' + esc(u.name) + '"' : ' title="???"';
-        return '<div class="' + cls + '"' + attrs + '><span class="n">' + sp.id + '</span><img loading="lazy" src="' + png(sp.id, false) + '" alt=""></div>';
+        return '<div class="' + cls + '"' + attrs + '><span class="n">' + sp.id + '</span><img data-src="' + png(sp.id, false) + '" alt=""></div>';
       }).join('');
       var shinyHtml = u.shinies.length
         ? u.shinies.map(function (id) {
             var nm = byId[id] ? pretty(byId[id].name) : '#' + id;
-            return '<div class="scell" data-dex="' + id + '" data-kind="shiny" data-user="' + esc(u.name) + '"><img loading="lazy" src="' + png(id, true) + '" alt=""><span>' + esc(nm) + '</span></div>';
+            return '<div class="scell" data-dex="' + id + '" data-kind="shiny" data-user="' + esc(u.name) + '"><img data-src="' + png(id, true) + '" alt=""><span>' + esc(nm) + '</span></div>';
           }).join('')
         : '<div class="sempty">NO SHINIES YET</div>';
       var partyHtml = u.party.length
         ? u.party.map(function (p) {
             return '<div class="pm' + (p.shiny ? ' sh' : '') + (me && me === u.name ? ' mine' : '') + '"' +
               ' data-user="' + esc(u.name) + '" data-slot="' + p.slot + '" data-id="' + p.id + '" data-shiny="' + (p.shiny ? 1 : 0) + '"' +
-              ' data-name="' + esc(p.name) + '" data-level="' + p.level + '"><img loading="lazy" src="' + png(p.id, p.shiny) + '" alt=""><span class="sn">' + (p.slot + 1) + '</span></div>';
+              ' data-name="' + esc(p.name) + '" data-level="' + p.level + '"><img data-src="' + png(p.id, p.shiny) + '" alt=""><span class="sn">' + (p.slot + 1) + '</span></div>';
           }).join('')
         : '<div class="sempty" style="padding:8px">PARTY IS EMPTY</div>';
       return '<div class="card" data-card="' + esc(u.name) + '">' +
@@ -3972,7 +4070,7 @@ const PAGE = `<!DOCTYPE html>
   }
 
   // ---------- battle & trade panel (logged-in trainers only) ----------
-  var playTimer = null, playState = null, playFormSig = '', playStatusSig = '';
+  var playTimer = null, playState = null, playFormSig = '', playStatusSig = '', playIdle = false, playTick = 0;
 
   function stopPlay() {
     if (playTimer) { clearInterval(playTimer); playTimer = null; }
@@ -3981,7 +4079,8 @@ const PAGE = `<!DOCTYPE html>
   }
   function startPlay() {
     $('play').style.display = 'block';
-    if (!playTimer) playTimer = setInterval(pollPlay, 3000);
+    // every 3 s while a battle or trade is going on, every 9 s when nothing is happening
+    if (!playTimer) playTimer = setInterval(function () { playTick++; if (playIdle && playTick % 3) return; pollPlay(); }, 3000);
     pollPlay();
   }
   function partyOptions(party) {
@@ -3996,6 +4095,7 @@ const PAGE = `<!DOCTYPE html>
       if (r.status === 401) { me = null; token = null; store('ph_token', null); renderAuth(); return; }
       if (!r.ok) return;
       playState = await r.json();
+      playIdle = !(playState.battle || playState.tradeIn || playState.tradeOut);
       renderPlay();
     } catch (e) {}
   }
@@ -4177,6 +4277,9 @@ const PAGE = `<!DOCTYPE html>
 </script>
 </body>
 </html>`;
+
+// The page shell sent to browsers (its CSS and JS are separate files, see "Site assets").
+const SITE_HTML = externalizePage(PAGE, 'site');
 
 // ===================================================================
 // 13. START-UP
