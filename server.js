@@ -415,7 +415,7 @@ async function subscribeKickRewardWebhook(token) {
   }
 }
 
-// Step A: Visit /kick-login?secret=mysecret99 once to authorize
+// Step A: Visit /kick-login?secret=mypassword once to authorize
 // (add &rewards=1 to also allow Channel Points rewards)
 app.get('/kick-login', checkSecret, (req, res) => {
   tempPkceVerifier = crypto.randomBytes(32).toString('base64url');
@@ -440,7 +440,7 @@ app.get('/kick-callback', async (req, res) => {
     const code = req.query.code;
     const verifier = tempPkceVerifier;
     if (typeof code !== 'string' || !verifier || !tempOauthState || req.query.state !== tempOauthState) {
-      return res.send('❌ Missing code or session expired. Open /kick-login?secret=mysecret99 again.');
+      return res.send('❌ Missing code or session expired. Open /kick-login?secret=mypassword again.');
     }
 
     const params = new URLSearchParams({
