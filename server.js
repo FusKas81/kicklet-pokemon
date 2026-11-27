@@ -1,243 +1,322 @@
-// ===================================================================
-// SETUP GUIDE: HOW TO RUN THIS BOT ON ANOTHER KICK.COM CHANNEL
-// ===================================================================
-// This file is the whole project: the chat bot, the Pokédex website (/pokedex) and the OBS overlay (/overlay).
-// Follow the parts in order. Everything used here has a free plan. Time needed: about 45 minutes the first time.
-// Words in CAPITALS (YOUR_APP, YOUR_SECRET, ...) are things you replace with your own values.
+// ===================================================================================================================
+//  KICK POKÉMON BOT  -  server.js
+//  One single file that contains EVERYTHING: the chat bot, the Pokédex website (/pokedex) and the OBS overlay (/overlay).
+// ===================================================================================================================
 //
-// WHAT YOU NEED
-//   - A Kick account (the streamer's) with two-factor authentication turned on (Kick requires it for developer apps)
-//   - A free GitHub account        (holds the code so Render can run it)
-//   - A free Render account        (runs the bot 24/7, gives you the web address)       https://render.com
-//   - A free MongoDB Atlas account (database where Pokémon, parties and Pokédexes are saved)  https://www.mongodb.com/atlas
-//   - A free cron-job.org account  (calls the bot every 5 minutes to spawn Pokémon and keep it awake)
-//   - OBS Studio (or any streaming software that has a "Browser Source")
+//  WHAT THIS PROJECT DOES
+//  Viewers type commands in your Kick chat (!catch, !party, !battle @friend 1, !trade ...). Every few minutes a wild
+//  Pokémon (Generation 1 + 2, 251 species) appears on stream and the first viewers to type !catch get it. Viewers
+//  collect a party, fill a Pokédex, trade, battle (Gold/Silver/Crystal rules), compete in leaderboards, and can manage
+//  their party on a website. Everything is saved in a database, so nothing is lost when the server restarts.
 //
-// HOW IT WORKS (so the steps make sense)
-//   Chat message on Kick  ->  Kick sends it to YOUR_APP.onrender.com/kick-webhook  ->  the bot runs the !command
-//   ->  the bot answers in chat through the Kick API.  Pokémon spawn when cron-job.org opens /spawn every 5 minutes.
-//   Viewers see the spawn on the OBS overlay (/overlay) and browse everything on the website (/pokedex).
+//  HOW THE PIECES TALK TO EACH OTHER (read this once, the steps below make more sense afterwards)
 //
-// -------------------------------------------------------------------
-// PART 1 - DATABASE (MongoDB Atlas)
-// -------------------------------------------------------------------
-//  1. Create an account at mongodb.com/atlas and create a FREE cluster ("M0" / Free). Any region is fine.
-//  2. Left menu "Database Access" -> "Add New Database User". Choose a username and a password. Use only letters and
-//     numbers in the password (symbols such as @ : / ? # break the connection address). Give it "Read and write to any
-//     database". Write both down.
-//  3. Left menu "Network Access" -> "Add IP Address" -> "ALLOW ACCESS FROM ANYWHERE" (0.0.0.0/0) -> Confirm.
-//     (Render's free plan has no fixed IP address, so Atlas must accept connections from anywhere. The user and
-//     password still protect it.)
-//  4. "Database" -> your cluster -> "Connect" -> "Drivers" -> copy the connection string. It looks like:
-//        mongodb+srv://USERNAME:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-//     Replace <password> with your real password (remove the < >). Optionally put a database name after the "/",
-//     for example ...mongodb.net/pokemonbot?retryWrites=...   This whole text is your MONGO_URI (used in Part 4).
-//     The bot creates the collection by itself, you do not create tables.
+//     Viewer types "!catch" in Kick chat
+//           |  Kick sends every chat message to the bot's "webhook" address (a web address on your server)
+//           v
+//     Your server on RENDER (this file)  <------>  MongoDB ATLAS database (saves parties, Pokédexes, wins ...)
+//           |  the bot answers by posting in chat through the Kick API, as the Kick account you log in with
+//           v
+//     Kick chat shows the answer.
 //
-// -------------------------------------------------------------------
-// PART 2 - KICK DEVELOPER APP (lets the bot read chat and write in chat)
-// -------------------------------------------------------------------
-// You must do Part 3 (Render) first to know your web address, OR choose the Render service name now: the address will be
-// https://YOUR_APP.onrender.com  (YOUR_APP = the service name you pick in Part 3). Use the same name in both places.
-//  1. On kick.com log in with the account that owns the channel. Open Settings -> "Developer" tab. Turn on
-//     two-factor authentication first if Kick asks for it.
-//  2. Click "Create application" and fill in:
-//        Name ............ anything (for example "Pokemon Bot")
-//        Redirect URL .... https://YOUR_APP.onrender.com/kick-callback      (must match exactly, no trailing slash)
-//        Enable webhooks . ON
-//        Webhook URL ..... https://YOUR_APP.onrender.com/kick-webhook
-//  3. Save. Kick shows a Client ID and a Client Secret. Copy both (the secret may only be shown once).
-//     They become KICK_CLIENT_ID and KICK_CLIENT_SECRET.
-//  4. You also need KICK_BROADCASTER_ID: the NUMBER that identifies the channel owner's account (not the name).
-//     Ways to find it:
-//        a) In a browser, while logged in to Kick, open  https://kick.com/api/v2/channels/YOUR_CHANNEL_NAME
-//           and look for  "user_id": 1234567  (the number next to "user_id", NOT the "id" of the channel).
-//        b) Or finish Part 5 first, then ask the Kick API for the authorized user:  GET https://api.kick.com/public/v1/users
-//           with the header  Authorization: Bearer ACCESS_TOKEN  (the "user_id" in the answer is the number).
-//     If Kick changes these pages, search "Kick API get user id" in the official Kick developer docs (docs.kick.com).
-//  5. Which account writes the chat messages? The account you log in with in Part 5. Using the streamer's account is the
-//     simplest (messages appear as the streamer). If you prefer a separate bot account, authorize with that account in
-//     Part 5, but KICK_BROADCASTER_ID must still be the STREAMER's id, and the bot account should be a moderator of the
-//     channel so it is never blocked by slow mode / follower-only mode.
+//     cron-job.org opens  <your site>/spawn  every 5 minutes  ->  a new wild Pokémon appears
+//     OBS "Browser Source" shows  <your site>/overlay          ->  the wild Pokémon / battles on your stream
+//     Viewers open        <your site>/pokedex                  ->  leaderboards, Pokédexes, party management
 //
-// -------------------------------------------------------------------
-// PART 3 - THE CODE ON GITHUB + THE SERVER ON RENDER
-// -------------------------------------------------------------------
-//  1. On github.com create a new repository (can be private). Upload two files to the root of it:
-//        server.js      (this file)
-//        package.json   (create it with exactly this content):
-//             {
-//               "name": "kick-pokemon-bot",
-//               "version": "1.0.0",
-//               "type": "module",
-//               "main": "server.js",
-//               "scripts": { "start": "node server.js" },
-//               "engines": { "node": ">=18" },
-//               "dependencies": { "axios": "^1.7.0", "express": "^4.19.0", "mongoose": "^8.0.0" }
-//             }
-//     ("type": "module" is required: the file uses import statements.)
-//  2. On render.com: "New +" -> "Web Service" -> connect your GitHub account -> pick the repository.
-//        Name ............. YOUR_APP  (this becomes https://YOUR_APP.onrender.com, lowercase, no spaces)
-//        Runtime .......... Node
-//        Build Command .... npm install
-//        Start Command .... npm start        (or: node server.js)
-//        Instance type .... Free
-//  3. Before the first deploy (or afterwards under the service's "Environment" tab) add the variables of Part 4.
-//  4. Every time you change server.js on GitHub (commit), Render rebuilds automatically ("Auto-Deploy").
-//     The free plan sleeps after 15 minutes without visits: Part 6 fixes that.
+// ===================================================================================================================
+//  SETUP GUIDE FOR BEGINNERS - HOW TO RUN THIS BOT ON YOUR OWN KICK.COM CHANNEL (no programming knowledge needed)
+// ===================================================================================================================
+//  Time needed: about 1 hour the first time. Cost: 0 (every service below has a free plan). Do the parts IN ORDER.
+//  If a screen on a website looks a little different from what is described here (websites change their buttons from
+//  time to time), look for the button with the same meaning.
 //
-// -------------------------------------------------------------------
-// PART 4 - ENVIRONMENT VARIABLES (Render -> your service -> Environment)
-// -------------------------------------------------------------------
-//   MONGO_URI ............. the MongoDB connection string from Part 1 (required, the bot refuses to start without it)
-//   KICK_CLIENT_ID ........ from the Kick developer app (Part 2)
-//   KICK_CLIENT_SECRET .... from the Kick developer app (Part 2)
-//   KICK_BROADCASTER_ID ... the number from Part 2, step 4. This account is also treated as moderator/broadcaster.
-//   BOT_SECRET ............ a password YOU invent (long, random, letters and numbers). It protects /kick-login and /spawn.
-//                           If it is missing, those two addresses stay locked. Never share it or post links containing it.
-//   SITE_URL .............. https://YOUR_APP.onrender.com   (no trailing slash). Used for the login redirect and the links
-//                           the bot writes in chat. Without it the bot would use the original author's address.
-//   PORT .................. do NOT set it, Render sets it by itself.
-//   ASSET_BASE ............ optional (CDN for the site's CSS/JS, saves bandwidth). Leave empty unless you know what it is.
-//   KICK_WEBHOOK_VERIFY ... optional. Leave empty. Setting it to "off" disables the Kick signature check (emergency only:
-//                           it lets anybody send fake chat events).
+//  WORDS YOU WILL SEE
+//   - "Repository" (repo): a folder of files stored on GitHub. Render reads your code from it.
+//   - "Deploy": Render copies your code, installs what it needs and starts it. You see the status "Live" when it works.
+//   - "Environment variable": a private setting (like a password) that you type into Render. The code reads it, so
+//     passwords never sit inside the code file.
+//   - "Webhook": a web address that Kick calls every time something happens in your chat.
+//   - Anything written in CAPITAL LETTERS like YOUR_APP or YOUR_BOT_SECRET is a placeholder: replace it with your value.
 //
-// -------------------------------------------------------------------
-// PART 5 - CHANGES INSIDE THIS FILE FOR YOUR CHANNEL
-// -------------------------------------------------------------------
-// Use the search of your editor (GitHub's web editor works: open the file, pencil icon, Ctrl+F).
-//  a) The example trainer "fuskas". It is a bot-controlled trainer that anybody can battle and trade with, shown on top of
-//     the website. To rename it, replace every  fuskas  in this file with your own lowercase name (letters/numbers
-//     only, it must not be the name of a real viewer). Do the replace over the WHOLE file: the website code is inside
-//     this file too. Spots that matter: AUTO_TRAINER, maxPartyFor, FEATURED (website), the texts "@fuskas" and the
-//     "🤖@fuskas" helper (search "botify" / "addBotEmote").
-//  b) The website title: search  POKÉDEX HALL - KickDROPS_24h  and write your own.
-//  c) Chat emotes: texts like [emote:5756671:GIGACHAD] are Kick emotes of the original channel, in the form
-//     [emote:NUMBER:name]. Emotes only appear if they exist on your channel or are global Kick emotes. Replace each with
-//     an emote of your channel (type an emote in chat and look at the number in the chat message info), or simply
-//     delete the whole [emote:...] text. Search for  [emote:  to find them all.
-//  d) The Channel Points reward name and price: REWARD_NAME ('Random Pokemon') and REWARD_COST in section 2. The reward
-//     you create on Kick (Part 8) must have exactly the same title as REWARD_NAME (upper/lower case does not matter).
-//  e) Game settings in section 2 (all optional): MAX_INVENTORY (party size), MAX_CATCH_TRIES, CATCH_WINDOW_MS (seconds a
-//     Pokémon can be caught), SPAWN_CMD_COOLDOWN_MS (!spawn cooldown, subscribers/mods), SPAWN_INTERVAL_MINUTES (only the text shown in
-//     chat: keep it equal to your cron-job schedule from Part 6).
-//  f) Commit the changes on GitHub, wait for Render to show "Live" (green).
+//  BEFORE YOU START - open a notepad and keep these 7 values there, you will collect them one by one:
+//     1) YOUR_APP .......... the name of your server on Render (becomes https://YOUR_APP.onrender.com)   [Part 4]
+//     2) YOUR_KICK_NAME .... your Kick username in lowercase letters, e.g. ash                          [you know it]
+//     3) MONGO_URI ......... the database connection text                                               [Part 1]
+//     4) KICK_CLIENT_ID .... from your Kick developer app                                               [Part 5]
+//     5) KICK_CLIENT_SECRET  from your Kick developer app (like a password, never show it)             [Part 5]
+//     6) KICK_BROADCASTER_ID your numeric Kick user id (the bot shows it to you after login)           [Part 7]
+//     7) BOT_SECRET ........ a password you invent, long, only letters and numbers, e.g. k8Hs92LmQp47Zt   [Part 6]
 //
-// -------------------------------------------------------------------
-// PART 6 - CRON JOBS (automatic spawns + keeping the free server awake) on cron-job.org
-// -------------------------------------------------------------------
-//  Create two jobs ("CREATE CRONJOB"), both with method GET:
-//   1) Spawn:  URL  https://YOUR_APP.onrender.com/spawn?secret=YOUR_BOT_SECRET   Schedule: every 5 minutes
-//   2) Awake:  URL  https://YOUR_APP.onrender.com/ping                           Schedule: every 5 minutes (or 10)
-//  YOUR_BOT_SECRET is the BOT_SECRET value of Part 4. Without job 2 the free Render server falls asleep and the bot
-//  stops hearing chat. In job 1 under "Advanced" you may set a timeout of 30 s. If the secret is wrong, the job shows
-//  "401 Unauthorized". The spawn is skipped by design when a Pokémon can still be caught or a viewer used !spawn recently.
+//  ACCOUNTS YOU NEED (all free): Kick (yours, the channel owner), GitHub, Render, MongoDB Atlas, cron-job.org.
+//  Also OBS Studio (or any streaming program with a "Browser Source").
 //
-// -------------------------------------------------------------------
-// PART 7 - CONNECT THE BOT TO KICK (one time)
-// -------------------------------------------------------------------
-//  1. Open in your browser (logged in to Kick with the account that should write the chat messages):
-//        https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET
-//     (The bot always asks for the chat AND Channel Points permissions; an old "&rewards=1" at the end is harmless.)
-//  2. Kick asks you to allow the app. Accept all permissions. You come back to a page saying "Kick connected!".
-//     The bot saved its access tokens in the database and renews them by itself, and it subscribed to chat events
-//     and to Channel Points events. In the Render log look for the line "Permissions granted:" - it must list
-//     chat:write, user:read, events:subscribe, channel:rewards:read and channel:rewards:write.
-//     If rewards are missing, Kick is re-using an old approval: on Kick open Settings -> connected/authorized apps,
-//     remove this app, then repeat step 1.
-//  3. Test: type  !help  in your chat. The bot must answer. If not, see "PROBLEMS" at the end.
-//  4. Repeat step 1 only if you change the Kick app, the redirect URL or the scopes, or if the bot stops answering
-//     after a long break.
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 1 - THE DATABASE (MongoDB Atlas: where all Pokémon are saved)                                  ~10 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   1. Go to https://www.mongodb.com/atlas and create a free account.
+//   2. Create a cluster and choose the FREE option (called "M0" / "Free"). Any region is fine (pick one close to you).
+//   3. Create the database user. In the left menu open "Database Access" -> "Add New Database User":
+//        - Username: for example  pokebot
+//        - Password: invent one using ONLY letters and numbers (symbols like @ : / # ? break the connection text).
+//        - Built-in role: "Read and write to any database".  Save, and write the username and password on your notepad.
+//   4. Let your server connect. Left menu "Network Access" -> "Add IP Address" -> "ALLOW ACCESS FROM ANYWHERE"
+//      (it shows 0.0.0.0/0) -> Confirm. (Render's free plan has no fixed address, so this is required. Your database is
+//      still protected by the username and password above.)
+//   5. Get the connection text: left menu "Database" -> click "Connect" on your cluster -> "Drivers" -> copy the text
+//      that looks like:
+//          mongodb+srv://pokebot:<password>@cluster0.abcde.mongodb.net/?retryWrites=true&w=majority
+//      Replace  <password>  (including the < > signs) with your real password. That final text is your MONGO_URI.
+//   You do NOT need to create tables or collections: the bot creates them by itself the first time it runs.
 //
-// -------------------------------------------------------------------
-// PART 8 - CHANNEL POINTS REWARD "Random Pokemon" (optional)
-// -------------------------------------------------------------------
-//  1. The Part 7 login must have granted channel:rewards:write (check the "Permissions granted:" log line).
-//  2. On Kick open your Creator Dashboard -> Channel Points -> Rewards -> create a reward titled exactly the same as
-//     REWARD_NAME ("Random Pokemon" by default) with the price you like. Leave "require user input" off.
-//  3. When a viewer redeems it the bot gives a random Pokémon missing from their Pokédex and announces it in chat.
-//     It is paid once per redemption even when Kick sends two events (pending, then accepted).
-//  4. When the Pokémon is delivered the bot approves the redemption on Kick by itself (the queue stays clean). If it can't be
-//     given (party full, or the viewer already has the whole Pokédex) the bot rejects the redemption, which gives the
-//     Channel Points back, and says so in chat. This needs the Part 7 login with
-//     the channel:rewards:write permission and a reward that waits in Kick's redemption queue: keep the reward option
-//     "Skip reward request queue" OFF (when it is on Kick completes the redemption itself and it can no longer be refunded).
-//     If Kick refuses the refund the bot says a mod can refund it, and the reason is written in the Render logs.
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 2 - PERSONALIZE THIS FILE FOR YOUR CHANNEL (before uploading it)                              ~10 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//  Use "Find and Replace" of any text editor (Notepad++, VS Code, or Ctrl+H). Turn ON "match case".
 //
-// -------------------------------------------------------------------
-// PART 9 - OBS OVERLAY (shows the wild Pokémon and the battles)
-// -------------------------------------------------------------------
-//  1. In OBS: Sources "+" -> "Browser" -> name it "Pokemon overlay".
-//  2. URL:    https://YOUR_APP.onrender.com/overlay
-//     Width 1920, Height 1080 (your canvas size). Leave "Custom CSS" with only the default text or empty
-//     (the background is already transparent). Do NOT tick "Shutdown source when not visible" if you want the
-//     spawn to be ready the moment you switch scenes; tick "Refresh browser when scene becomes active" if the picture ever
-//     looks stuck.
-//  3. Put the source on top of your game/camera. The wild Pokémon card appears at the top centre when a spawn happens and
-//     the battle screen appears while two trainers fight. Move/scale it with the red box in OBS.
-//  4. Test without waiting: type !spawn in chat (owner, moderators and subscribers only, 10 minute cooldown per user), or open
-//     the /spawn link of Part 6 in a browser.
+//   a) THE EXAMPLE TRAINER. This file was made for a streamer called "fuskas". His own account is the bot's featured
+//      trainer: viewers can battle and trade with him any time, he is shown first on the website and he has a bigger
+//      party. For YOUR channel do:  Replace All   fuskas   ->   YOUR_KICK_NAME   (lowercase, e.g. ash).
+//      Afterwards, in your own chat, catch at least one Pokémon with your own account: the featured trainer needs a
+//      Pokémon in party slot 1 (that Pokémon fights every challenge and can never be traded or released).
+//      (Everything with "FUSKAS" in capitals can stay as it is, it is only a constant name.)
+//   b) THE WEBSITE TITLE. Find  POKÉDEX HALL - KickDROPS_24h  and write your own title.
+//   c) CHAT EMOTES. Texts like  [emote:5339426:kickDrops]  are emotes of the original channel (format
+//      [emote:NUMBER:name]). Emotes that do not exist on your channel show as plain text. Either delete each one
+//      or use your own: type your emote in your chat and Kick shows its number in the message; the form stays
+//      [emote:NUMBER:name]. Search for  [emote:  to find all of them (about 25).
+//   d) THE CHANNEL POINTS REWARD (optional, Part 9). Find  REWARD_NAME  and  REWARD_COST  near the top, in section 2.
+//   e) GAME SETTINGS (optional, all in section 2 near the top):
+//        MAX_INVENTORY ............ how many Pokémon each viewer can hold (default 50)
+//        MAX_CATCH_TRIES .......... catch attempts per viewer for each wild Pokémon (default 3)
+//        CATCH_WINDOW_MS .......... how long a wild Pokémon stays catchable (default 180 seconds)
+//        SPAWN_CMD_COOLDOWN_MS .... cooldown of the !spawn command (default 10 minutes)
+//        SPAWN_INTERVAL_MINUTES ... only used in chat texts; keep it equal to the cron-job.org schedule (Part 8)
+//   Save the file as  server.js .
 //
-// -------------------------------------------------------------------
-// PART 10 - THE POKÉDEX WEBSITE
-// -------------------------------------------------------------------
-//  Address: https://YOUR_APP.onrender.com/pokedex  (put it in your Kick channel description / panels / a chat command).
-//  - Everybody sees the leaderboards (catches, battle wins, shiny), every trainer's Pokédex and party.
-//  - To manage a party (release, battle, trade) a viewer presses LOGIN, types their Kick username, gets a code like
-//    AB12CD and types  !verify AB12CD  in YOUR Kick chat from their own account. The site then logs them in for a year
-//    in that browser. They must have caught at least one Pokémon first.
-//  - Pokémon pictures are loaded from GitHub (PokeAPI sprites) and the pixel font from Google Fonts, so those two
-//    internet sites must be reachable by the viewer. Nothing else is needed.
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 3 - PUT THE CODE ON GITHUB                                                                     ~10 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   1. Create a free account at https://github.com and click  "+"  ->  "New repository". Name it for example
+//      kick-pokemon-bot. "Private" is fine. Create it.
+//   2. Click "uploading an existing file" (or  Add file -> Upload files) and upload TWO files to the main folder:
+//        - server.js     (this file, saved in Part 2)
+//        - package.json  (create a text file with this EXACT content and name it package.json):
 //
-// -------------------------------------------------------------------
-// COMMANDS FOR VIEWERS (also listed on the website): !catch, !party, !info <slot>, !release <slot>, !pokedex, !wild,
-// !spawncheck, !spawn, !leaderboard, !trade @user <slot>, !accept <slot>, !battle @user <slot>, !move <1-4>, !forfeit,
-// !help, !pokemon, !verify <code>. !spawn: owner, moderators and subscribers. Owner/moderators only (hidden): !shinyspawn, !givedex @user.
+//            {
+//              "name": "kick-pokemon-bot",
+//              "version": "1.0.0",
+//              "type": "module",
+//              "main": "server.js",
+//              "scripts": { "start": "node server.js" },
+//              "engines": { "node": ">=18" },
+//              "dependencies": { "axios": "^1.7.0", "express": "^4.19.0", "mongoose": "^8.0.0" }
+//            }
 //
-// -------------------------------------------------------------------
-// PROBLEMS AND HOW TO FIX THEM (always look at Render -> your service -> "Logs" first)
-// -------------------------------------------------------------------
-//  - Log says "MONGO_URI is missing": add the variable (Part 4), then Render -> "Manual Deploy".
-//  - Log says it cannot connect to MongoDB: wrong password in MONGO_URI, symbols in the password, or Network Access of
-//    Atlas does not allow 0.0.0.0/0 (Part 1, steps 2-3).
-//  - "Kick login failed" / page shows an error: redirect URL in the Kick app must be exactly
-//    https://YOUR_APP.onrender.com/kick-callback, Client ID/Secret must be copied without spaces, SITE_URL must be set.
-//  - Open /kick-login says "Unauthorized": the secret in the link is not the same as BOT_SECRET (or BOT_SECRET is missing).
-//  - Bot silent in chat: (1) check the log for "Rejected a webhook call": the Kick app "Webhook URL" is wrong or Kick
-//    changed its signature scheme (emergency: KICK_WEBHOOK_VERIFY=off, then tell the developer). (2) The free server
-//    was asleep: check the "Awake" cron job. (3) Redo Part 7. (4) The Kick account may be blocked by slow mode: make
-//    it a moderator.
-//  - Channel Points not refunded (log shows "401 Unauthorized" or "Could not reject"): the bot's Kick login lacks the
-//    channel:rewards:write permission (look for the "Permissions granted:" line after logging in) - remove the app in Kick
-//    Settings -> connected apps and log in again (Part 7); and keep "Skip reward request queue" OFF on the reward.
-//  - Nothing spawns: the "Spawn" cron job shows an error, or BOT_SECRET differs, or the previous Pokémon can still be caught.
-//  - Overlay empty: normal when nothing is happening. Open https://YOUR_APP.onrender.com/battle-data to see the raw data.
-//  - Emotes show as plain text [emote:...]: that emote does not exist on your channel (Part 5c).
-//  - Everything resets: the database was changed or MONGO_URI points to another database/cluster.
-//  - Backups: in Atlas you can export the data ("Browse Collections" -> export). The whole game is one document with the id "main".
-//  - Costs: everything above is free; Render's free plan has monthly hour/bandwidth limits and slow first load after sleep.
-//  - Security: never publish MONGO_URI, KICK_CLIENT_SECRET or BOT_SECRET (or links containing the secret). If one leaks,
-//    change it (Atlas password / Kick app secret / BOT_SECRET) and update Render.
-// ===================================================================
-
-// ===================================================================
-// TABLE OF CONTENTS. server.js - Pokémon bot for Kick chat
-// Single-file Node (ESM) app: Express + Mongoose, deployed on Render. Sections, in file order:
-// 
-//  1. SETUP & DATABASE ....... imports, Express, MongoDB schema, in-memory game state, save queue, lock
-//  2. CONFIG & CONSTANTS ..... party size, catch/spawn timing, URLs, @fuskas auto-trainer, battle timing
-//  3. KICK INTEGRATION ....... OAuth token, spaced chat sender, webhook subscription, login routes
-//  4. GEN 2 DATA & ENGINE .... all 251 Pokémon data + the Gold/Silver/Crystal battle engine
-//  5. POKÉMON HELPERS ........ create / upgrade / evolve Pokémon, Pokédex + shiny records
-//  6. BATTLE FLOW ............ timers, commentary, rounds, winner announcements
-//  7. SPAWNING ............... wild Pokémon spawn + next-spawn countdown text
-//  8. CHAT COMMANDS .......... processCommand: every !command typed in chat
-//  9. HTTP ROUTES ............ /ping, /spawn (cron), /kick-webhook, /battle-data
-// 10. OBS OVERLAY PAGE ....... /overlay (Game Boy Color style stream overlay)
-// 11. BACKGROUND TIMER ....... every 3 s: battle timers + 'fled' announcements
-// 12. WEBSITE ................ registerPokedexSite: /pokedex page + its JSON/login/play APIs
-// 13. START-UP ............... runCommand helpers for the site, route registration, listen()
-// ===================================================================
+//      ("type": "module" is required: without it the bot does not start.)  Click "Commit changes".
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 4 - THE SERVER ON RENDER (it runs the bot 24/7)                                                ~10 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   1. Create a free account at https://render.com (you can sign in with GitHub, which also lets Render see your repo).
+//   2. Click "New +" -> "Web Service" -> choose your repository (allow Render to access it if it asks).
+//   3. Fill in:
+//        Name ............ the name you want in your address, lowercase, no spaces: this is YOUR_APP
+//                          (your address will be  https://YOUR_APP.onrender.com ; if the name is already taken Render
+//                          adds letters - always use the address Render shows you at the top of the service page)
+//        Region .......... any
+//        Branch .......... main
+//        Runtime ......... Node
+//        Build Command ... npm install
+//        Start Command ... npm start
+//        Instance Type ... Free
+//   4. Click "Create Web Service". The first start will FAIL or show errors until Part 6 is done: that is normal.
+//   5. Write the address on your notepad: https://YOUR_APP.onrender.com  (no slash at the end).
+//   Every time you later change server.js on GitHub (Commit), Render redeploys by itself (takes 1-3 minutes).
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 5 - THE KICK DEVELOPER APP (permission for the bot to read your chat and write in it)         ~10 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   1. Log in to kick.com with your channel account and open  https://kick.com/settings/developer
+//      (Settings -> "Developer" tab). If Kick asks you to turn on two-factor authentication first, do it.
+//   2. Create a new application and fill in:
+//        Application name ... anything, for example  My Pokemon Bot
+//        Redirect URL ....... https://YOUR_APP.onrender.com/kick-callback    (copy exactly, no space, no slash at end)
+//        Webhook URL ........ https://YOUR_APP.onrender.com/kick-webhook     (if there is a switch to enable
+//                             webhooks, turn it ON)
+//        Description/category: anything that fits
+//   3. Save. Kick shows a CLIENT ID and a CLIENT SECRET. Copy both to your notepad now (the secret may be shown only
+//      once; if you lose it, you can create a new one in the same page).
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 6 - THE SETTINGS ON RENDER (environment variables)                                             ~5 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   On Render open your service -> left menu "Environment" -> "Add Environment Variable". Add these, one by one
+//   (name on the left exactly as written, value on the right), then press "Save, rebuild and deploy":
+//
+//     MONGO_URI .............. the connection text from Part 1 (required: without it the bot refuses to start)
+//     KICK_CLIENT_ID ......... from Part 5
+//     KICK_CLIENT_SECRET ..... from Part 5
+//     BOT_SECRET ............. a password YOU invent (letters and numbers only, long). It protects the two admin
+//                              addresses /kick-login and /spawn. If it is missing, those addresses stay LOCKED.
+//     SITE_URL ............... https://YOUR_APP.onrender.com   (no slash at the end)
+//     KICK_BROADCASTER_ID .... your numeric Kick user id. You do not know it yet: skip it for now, Part 7 shows it.
+//
+//   Optional ones (leave them out unless you know why):
+//     ASSET_BASE ............. address of a CDN that hosts the site's CSS/JS files (saves bandwidth)
+//     KICK_WEBHOOK_VERIFY .... "off" disables the check that every chat event really comes from Kick. EMERGENCY ONLY,
+//                              because while it is off anybody can send fake commands to your bot.
+//   Do NOT create a PORT variable, Render sets it by itself.
+//   Check: the service should now say "Live" and the Logs (left menu) should show  "Bot online on port ...".
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 7 - CONNECT THE BOT TO YOUR KICK ACCOUNT (one time)                                            ~5 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   The bot writes in your chat as the Kick account you log in with here. Simplest: log in with your own channel
+//   account (messages then appear as you). A separate "bot account" also works if you log in with it, but then set up
+//   that account as a moderator of your channel (so slow mode never blocks it).
+//   1. In your browser, logged in to Kick with that account, open (replace the two placeholders):
+//          https://YOUR_APP.onrender.com/kick-login?secret=YOUR_BOT_SECRET
+//   2. Kick shows a permission screen. Accept EVERYTHING it asks (chat, user info, events, Channel Points).
+//   3. You land on a page saying  "Kick connected! Logged in as NAME (user id 1234567)".
+//      If it also says that KICK_BROADCASTER_ID is not set: copy that number, add the environment variable
+//      KICK_BROADCASTER_ID on Render (Part 6) with the CHANNEL OWNER's number, wait for the redeploy to finish and
+//      open the login link of step 1 again.
+//   4. Check the Render Logs. You should see the lines
+//          Permissions granted: chat:write user:read events:subscribe channel:rewards:read channel:rewards:write
+//          Subscribed to Kick chat.message.sent webhook!
+//          Subscribed to Kick channel.reward.redemption.updated webhook!
+//      If the rewards permissions are missing: Kick is re-using an old approval. On Kick open Settings and look for
+//      the list of connected/authorized apps, remove this app, and repeat step 1.
+//   5. Test: type  !help  in your chat. The bot must answer within a few seconds.
+//   Repeat this part only if you change the Kick app, its redirect URL, or the bot stops answering after a long pause.
+//   Never post the login link anywhere: it contains your BOT_SECRET.
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 8 - AUTOMATIC SPAWNS + KEEP THE FREE SERVER AWAKE (cron-job.org)                               ~5 minutes
+// -------------------------------------------------------------------------------------------------------------------
+//   Render's free plan puts the server to sleep after about 15 minutes without visits; a sleeping bot cannot hear
+//   chat. cron-job.org is a free service that visits an address on a schedule. Create a free account at
+//   https://cron-job.org, click "CREATE CRONJOB" and make TWO jobs (method GET, schedule "every 5 minutes"):
+//        Job 1 "Spawn"  address: https://YOUR_APP.onrender.com/spawn?secret=YOUR_BOT_SECRET
+//        Job 2 "Awake"  address: https://YOUR_APP.onrender.com/ping
+//   Job 1 shows "401 Unauthorized" if the secret in the address differs from BOT_SECRET. A spawn is skipped on purpose
+//   while the previous Pokémon can still be caught. If you choose another schedule for job 1, update
+//   SPAWN_INTERVAL_MINUTES in section 2 so the "next spawn in ..." texts stay right.
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 9 - CHANNEL POINTS REWARD "Random Pokemon" (optional)
+// -------------------------------------------------------------------------------------------------------------------
+//   1. On Kick open your Creator Dashboard -> Channel Points -> Rewards and create a reward whose title is EXACTLY the
+//      same as REWARD_NAME in this file ("Random Pokemon"), with the price you like.
+//   2. IMPORTANT: keep the reward option "Skip reward request queue" (skip redemption queue) turned OFF. The bot has to
+//      see each redemption as "pending" so it can approve it or give the points back.
+//   3. When a viewer redeems it, the bot gives a random Pokémon they do not have in their Pokédex, puts it in their
+//      first free party slot, announces it in chat and approves the redemption on Kick.
+//   4. If the viewer cannot receive it (party full, or they already own every Pokémon) the bot rejects the redemption,
+//      which gives the Channel Points back, and says so in chat.
+//   This needs the permissions of Part 7 (check the "Permissions granted" log line). Each redemption is handled once,
+//   even if Kick sends the same event twice.
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 10 - THE OBS OVERLAY (shows the wild Pokémon and the battles on stream)
+// -------------------------------------------------------------------------------------------------------------------
+//   1. In OBS: Sources  "+"  ->  "Browser"  ->  name it "Pokemon overlay"  ->  OK.
+//   2. URL: https://YOUR_APP.onrender.com/overlay        Width: 1920        Height: 1080 (use your canvas size)
+//      Leave "Custom CSS" as it is (the background is already transparent).
+//   3. Click OK. The wild Pokémon card appears at the top centre while a spawn is active; battles show at the bottom
+//      centre. Drag the source to the top of your scene list so it is above game and camera.
+//   4. Test without waiting: type  !spawn  in chat (channel owner, moderators and subscribers only), or open the /spawn
+//      address of Part 8 in a browser.
+//   If the picture looks stuck, right-click the source -> Properties -> "Refresh cache of current page".
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 11 - THE POKÉDEX WEBSITE
+// -------------------------------------------------------------------------------------------------------------------
+//   Address: https://YOUR_APP.onrender.com/pokedex   (put it in your Kick channel panels or a chat command).
+//   - Everyone can see the leaderboards (catches, battle wins, shiny catches) and every trainer's party and Pokédex.
+//   - To manage a party (release, trade, battle) a viewer presses LOGIN, types their Kick username and gets a code such
+//     as AB12CD. They type  !verify AB12CD  in YOUR Kick chat from their own account and the site logs them in. They must
+//     have used the bot at least once first (for example typed !party or !catch).
+//   - Pokémon pictures come from GitHub (PokeAPI sprites) and the pixel font from Google Fonts, so those sites must be
+//     reachable by the viewer. Nothing else is needed.
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PART 12 - FINAL CHECK LIST (everything should be a YES)
+// -------------------------------------------------------------------------------------------------------------------
+//   [ ] Render shows "Live" and the Logs say "Bot online on port ..."
+//   [ ] Opening https://YOUR_APP.onrender.com/ping shows "Bot is awake!"
+//   [ ] Part 7 page said "Kick connected!" and the Logs list channel:rewards:write
+//   [ ] Typing !help in chat gets an answer
+//   [ ] Opening the /spawn address (with your secret) makes a Pokémon appear in chat and on the OBS overlay
+//   [ ] !catch catches it, !party shows it, https://YOUR_APP.onrender.com/pokedex shows the viewer
+//   [ ] Both cron-job.org jobs show green / success
+//   [ ] Optional: a test Channel Points redemption gives a Pokémon (and a full party gets the points back)
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  UPDATING THE BOT LATER
+//   Open server.js on GitHub -> pencil icon (edit) -> change it (or paste a new version) -> "Commit changes". Render
+//   redeploys by itself. Game data is not touched by updates. To undo a bad update, open the file's "History" on GitHub
+//   and restore the earlier version.
+//
+//  COMMANDS FOR VIEWERS (also listed on the website)
+//   !catch  !spawncheck / !wild  !party [page]  !info <slot>  !release <slot>  !pokedex  !leaderboard [shiny|catches|wins]
+//   !trade @user <slot>  !accept <slot>  !battle @user <slot>  !move <1-4>  !forfeit  !help / !pokemon  !verify <code>
+//   !spawn (owner, moderators, subscribers)       Owner/moderators only (hidden):  !shinyspawn   !givedex @user
+//
+// -------------------------------------------------------------------------------------------------------------------
+//  PROBLEMS AND HOW TO FIX THEM  (always start by reading Render -> your service -> "Logs")
+// -------------------------------------------------------------------------------------------------------------------
+//   - Logs say MONGO_URI is missing, or it cannot connect to MongoDB: re-check Part 1 (password with only letters and
+//     numbers, "<password>" replaced, Network Access allows 0.0.0.0/0) and the variable name MONGO_URI in Part 6.
+//   - /kick-login says "Unauthorized": the secret in the address is not exactly BOT_SECRET (or BOT_SECRET is missing).
+//   - "Kick login failed": the Redirect URL in the Kick app must be exactly  https://YOUR_APP.onrender.com/kick-callback ;
+//     KICK_CLIENT_ID / KICK_CLIENT_SECRET copied without spaces; SITE_URL set. The Logs show Kick's detailed reason.
+//   - Bot silent in chat: (1) Logs show "Rejected a webhook call": the Webhook URL in the Kick app is wrong, or Kick
+//     changed how it signs events (emergency only: KICK_WEBHOOK_VERIFY=off while you look for the cause). (2) The free
+//     server was asleep: check job 2 of Part 8. (3) Repeat Part 7. (4) The posting account is blocked by slow mode:
+//     make it a moderator.
+//   - Nothing spawns: job 1 of Part 8 shows an error, the secret differs, or the previous Pokémon can still be caught.
+//   - Overlay empty: normal while nothing is happening. https://YOUR_APP.onrender.com/battle-data shows the raw data.
+//   - Emotes appear as text like [emote:...]: that emote is not on your channel (Part 2c).
+//   - Channel Points not refunded (Logs: "401 Unauthorized" / "Could not reject"): the login lacks the
+//     channel:rewards:write permission (Part 7 step 4), or "Skip reward request queue" is ON (Part 9).
+//   - Everybody's Pokémon vanished: MONGO_URI points to another database. The whole game is ONE document (id "main")
+//     in your Atlas database; Atlas -> Browse Collections lets you look at and export it as a backup.
+//   - The first page load after a long pause is slow: that is Render's free plan waking up.
+//   - Security: never publish MONGO_URI, KICK_CLIENT_SECRET, BOT_SECRET or any link containing the secret. If one leaks,
+//     change it (Atlas password / new Kick app secret / new BOT_SECRET), update it on Render and redeploy.
+//   - Free plan limits: Render and Atlas have monthly limits on their free plans (hours, bandwidth, storage). One bot
+//     uses very little, and this code is built to save bandwidth, but check their pages if you grow very large.
+//
+// ===================================================================================================================
+//  FILE MAP - the code below is split into 13 numbered sections. To change something, find its section first.
+// ===================================================================================================================
+//   1. SETUP & DATABASE .... imports, the web server, the MongoDB model, the in-memory copy of the game, saving,
+//                            and the "lock" that makes every change happen one at a time (no two commands collide)
+//   2. CONFIG & CONSTANTS .. every setting: party size, catch tries, timings, URLs, the featured trainer, reward name
+//   3. KICK INTEGRATION .... login with Kick (OAuth), automatic token refresh, the chat sender, webhook subscriptions,
+//                            the admin routes /kick-login and /kick-callback
+//   4. GEN 2 DATA & ENGINE . all 251 Pokémon (stats, moves, evolutions) and the Gold/Silver/Crystal battle rules
+//   5. POKÉMON HELPERS ..... creating Pokémon, upgrading old saves, shiny + first-catch records, evolution
+//   6. BATTLE FLOW ......... battle timers, round commentary, winners, win recording (with the win-trading guard)
+//   7. SPAWNING ............ spawning wild Pokémon, "next spawn in" text, Channel Points settle/refund + Random Pokemon
+//   8. CHAT COMMANDS ....... processCommand: the brain that runs every !command (shared by chat and the website)
+//   9. HTTP ROUTES ......... /ping, /spawn, /kick-webhook (signature check), /battle-data, /assets
+//  10. OBS OVERLAY PAGE .... the /overlay page (HTML, CSS and JS in one text)
+//  11. BACKGROUND TIMER .... every 3 seconds: battle time limits and "the Pokémon fled" announcements
+//  12. WEBSITE ............. the /pokedex page and its APIs (login, release, play, leaderboard data)
+//  13. START-UP ............ helpers the website uses to run commands, route registration, error guards, listen()
+//
+//  SECURITY MEASURES BUILT IN (so you know what protects the bot)
+//   - Every Kick webhook call is checked with Kick's signature (RSA), old/duplicate events are ignored.
+//   - /kick-login and /spawn need BOT_SECRET (timing-safe compare; closed if BOT_SECRET is missing).
+//   - Website login needs a code typed in YOUR chat; session tokens are stored hashed, expire, and can be revoked.
+//   - Usernames like "constructor" / "__proto__" are refused, request bodies are capped at 64 KB.
+//   - Per-visitor rate limit on the website API, one command per 0.8 s per viewer, chat reply queue cap.
+//   - Trade offers expire and cannot be swapped under a viewer's nose; repeat wins against the same trainer within
+//     30 minutes are not counted (stops win trading).
+//   - Errors never show file paths or stack traces to visitors; a stray error cannot crash the bot.
+// ===================================================================================================================
 
 import express from 'express';
 import axios from 'axios';
@@ -312,8 +391,15 @@ if (!process.env.MONGO_URI) {
 
 // ===================================================================
 // 1. SETUP & DATABASE
-// Express app, MongoDB schema, the in-memory game state (write-behind saves) and the lock that
-// keeps every load -> change -> save cycle one-at-a-time.
+// WHAT IT CONTAINS
+//   - imports and the Express web server (security headers, request-size limit, website API rate limit)
+//   - the MongoDB model: the WHOLE game is ONE document (id "main") with users, the active spawn, trades, battles, Kick login tokens and website sessions
+//   - the in-memory copy of that document (cachedDoc), so commands never wait for the database
+//   - saving: changes are written ~250 ms later (saveDB), only the parts that changed are sent (savePartial), a full
+//     save happens every 3 hours (saveFull), and replies wait until the save is confirmed (flushConfirmed) so a restart never loses a catch
+//   - lockDB(): a queue so only ONE command changes the game at a time (prevents two commands colliding)
+//   - isUnsafeName(): refuses usernames like "constructor" that could damage the data
+// CHANGE HERE: normally nothing. Required environment variable: MONGO_URI.
 // ===================================================================
 
 const StateSchema = new mongoose.Schema({
@@ -474,7 +560,11 @@ function lockDB() {
 
 // ===================================================================
 // 2. CONFIG & CONSTANTS
-// Party limits, catch / spawn timing, site and OAuth URLs, the @fuskas auto-trainer and battle timing.
+// WHAT IT CONTAINS: every setting you may want to tune.
+//   party size (MAX_INVENTORY), catch tries and window, spawn timing and !spawn cooldown, trade/win-trading limits,
+//   SITE_URL and the links shown in chat, the featured trainer (AUTO_TRAINER, see the guide Part 2), Channel Points
+//   reward name/price, battle time limits, the bandwidth-saving ASSET_BASE option.
+// CHANGE HERE: yes, this is the section for settings. Do not remove constants: other sections use them.
 // ===================================================================
 
 const MAX_POKEMON_ID = 251; // Generations 1 + 2 (Bulbasaur #1 - Celebi #251)
@@ -482,6 +572,9 @@ const MAX_INVENTORY = 50;
 const FUSKAS_MAX_INVENTORY = 200; // the example trainer @fuskas has a bigger party
 const maxPartyFor = (name) => (name === 'fuskas' ? FUSKAS_MAX_INVENTORY : MAX_INVENTORY);
 const MAX_CATCH_TRIES = 3; // !catch attempts per trainer for each spawn
+const TRADE_OFFER_TTL_MS = 10 * 60 * 1000;      // a trade offer nobody accepts dies after 10 minutes
+const TRADE_OVERWRITE_GUARD_MS = 30 * 1000;     // a fresh offer can't be replaced for 30 s (stops "swap the offer" scams)
+const WIN_REPEAT_COOLDOWN_MS = 30 * 60 * 1000;  // beating the same trainer again within 30 min does not add to the win count
 const SPAWN_INTERVAL_MINUTES = 5;  // keep in sync with the cron-job.org schedule (only used in chat messages)
 const SPAWN_CMD_COOLDOWN_MS = 10 * 60 * 1000; // !spawn cooldown (per user)
 const CATCH_WINDOW_MS = 180 * 1000; // how long a spawned Pokémon can be caught (and stays on the overlay)
@@ -496,7 +589,8 @@ function spawnExpiresAt(spawn) {
 const SITE_URL = (process.env.SITE_URL || 'https://pokemon-fuskas.onrender.com').replace(/\/+$/, '');
 const REDIRECT_URI = `${SITE_URL}/kick-callback`;
 const POKEDEX_SITE = `${SITE_URL}/pokedex`;
-const SITE_NOTE = `🌐 Manage your Pokemon Party here ➡️ ${POKEDEX_SITE}`;
+const SITE_NOTE = `Easy party management here ➡️ ${POKEDEX_SITE}`;
+const CATCH_NOTE = `Manage your Pokemon here ➡️ ${POKEDEX_SITE}`; // added to !catch results
 
 // @fuskas is a bot-controlled example trainer: it accepts battle challenges and trade offers on its own.
 const AUTO_TRAINER = 'fuskas';
@@ -520,8 +614,13 @@ const BATTLE_RULES = `📜 Gen 2 rules: each round both trainers pick !move <1-4
 
 // ===================================================================
 // 3. KICK INTEGRATION
-// Small shared state, secret check, Kick OAuth (PKCE) token handling, the spaced chat sender,
-// chat-webhook subscription and the one-time /kick-login + /kick-callback routes.
+// WHAT IT CONTAINS: everything that talks to Kick.
+//   - checkSecret(): protects /kick-login and /spawn with BOT_SECRET (closed if BOT_SECRET is not set)
+//   - getKickAccessToken(): keeps the bot's Kick login valid, renewing the token by itself
+//   - sendKickChat(): posts bot messages one at a time (200 ms apart, max 500 characters, queue cap), adds the 🤖 before @fuskas
+//   - subscribeKickChatWebhook / subscribeKickRewardWebhook: ask Kick to send chat messages and Channel Points redemptions to /kick-webhook
+//   - /kick-login and /kick-callback: the one-time login (OAuth with PKCE + a "state" check); the success page shows the Kick user id
+// CHANGE HERE: normally nothing. Needs KICK_CLIENT_ID, KICK_CLIENT_SECRET, KICK_BROADCASTER_ID, BOT_SECRET.
 // ===================================================================
 
 // Store temporary PKCE verifier in memory during login
@@ -576,8 +675,12 @@ function addBotEmote(text) {
   return String(text).replace(/(?<!🤖)@fuskas('s)?(?![A-Za-z0-9_])/gi, '🤖@fuskas$1');
 }
 
+let chatQueued = 0;            // messages waiting to be sent
+const CHAT_QUEUE_MAX = 40;     // if chat is flooded, extra bot replies are dropped instead of piling up for minutes
 function sendKickChat(db, content, preToken = null) {
   content = addBotEmote(content);
+  if (chatQueued >= CHAT_QUEUE_MAX) return Promise.resolve();
+  chatQueued++;
   const job = chatChain.then(async () => {
     const wait = lastChatSentAt + CHAT_GAP_MS - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -597,7 +700,7 @@ function sendKickChat(db, content, preToken = null) {
       );
     } catch (err) {
       console.error('❌ Kick Chat Error:', err.response?.data || err.message);
-    }
+    } finally { chatQueued--; }
   });
   chatChain = job.catch(() => {});
   return job;
@@ -692,10 +795,22 @@ app.get('/kick-callback', async (req, res) => {
     tempPkceVerifier = null; tempOauthState = null; // one use only
     console.log('🔑 Kick login done. Permissions granted:', data.scope || '(Kick did not say)');
     if (!String(data.scope || '').includes('channel:rewards:write')) console.warn('⚠️ Channel Points refunds will NOT work: log in again with /kick-login?secret=... (if the permission is still missing, remove the app under Kick Settings -> connected apps first)');
+    // Ask Kick who just logged in, so a beginner can read their numeric user id (KICK_BROADCASTER_ID) off this page
+    let who = null;
+    try {
+      const me = await axios.get('https://api.kick.com/public/v1/users', { headers: { Authorization: `Bearer ${data.access_token}` }, timeout: 8000 });
+      who = me.data && me.data.data && me.data.data[0];
+    } catch (e) { console.error('⚠️ Could not read the logged-in Kick account:', e.response?.status || e.message); }
+    const whoId = who && who.user_id !== undefined ? String(who.user_id).replace(/[^0-9]/g, '') : '';
+    const whoName = who && who.name ? String(who.name).replace(/[^\w.\- ]/g, '') : '';
+    if (whoId) console.log(`👤 Logged in as ${whoName || '?'} (Kick user id ${whoId}). KICK_BROADCASTER_ID is ${process.env.KICK_BROADCASTER_ID || 'NOT SET'}.`);
     await subscribeKickChatWebhook(data.access_token);
     await subscribeKickRewardWebhook(data.access_token);
 
-    res.send('✅ Kick connected! Your Pokémon bot is now listening to chat and posting directly.');
+    const idNote = !process.env.KICK_BROADCASTER_ID
+      ? ` ⚠️ KICK_BROADCASTER_ID is not set on Render yet.${whoId ? ` If this is the channel owner's account, set it to ${whoId}, then open the login link again.` : ''}`
+      : (whoId && whoId !== String(process.env.KICK_BROADCASTER_ID) ? ` Note: this account (id ${whoId}) is not the KICK_BROADCASTER_ID account, so messages are sent by a separate bot account.` : '');
+    res.send(`✅ Kick connected!${whoName ? ` Logged in as ${whoName}${whoId ? ` (user id ${whoId})` : ''}.` : ''} Your Pokémon bot is now listening to chat and posting directly.${idNote}`);
   } catch (err) {
     console.error('❌ OAuth Callback Error:', err.response?.data || err.message);
     res.status(500).send('❌ Kick login failed. Details are in the Render logs.');
@@ -704,8 +819,12 @@ app.get('/kick-callback', async (req, res) => {
 
 // ===================================================================
 // 4. GEN 2 DATA & BATTLE ENGINE
-// GEN2 below = species, stats, moves, learnsets and evolutions for all 251 Pokémon (generated data).
-// After it: the Gen 2 type chart, damage formula, status / weather / special moves, and round resolution.
+// WHAT IT CONTAINS: the game's rules and data.
+//   GEN2 below = species, stats, moves, learnsets and evolutions for all 251 Pokémon (generated data, do not edit by hand).
+//   After it: type chart, damage formula, critical hits, accuracy, status effects (sleep, burn, ...), weather and the
+//   special moves, then the round engine (who is allowed to pick, speed/priority order, resolving a round, the bot
+//   trainer's automatic move).
+// CHANGE HERE: only if you want to change battle rules. A wrong edit here can break battles, so test after any change.
 // ===================================================================
 
 const GEN2 = {"mons":{"1":{"n":"BULBASAUR","t":["grass","poison"],"s":[45,49,49,45,65,65],"m":["TACKLE","GROWL"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[20,"POISONPOWDER"],[27,"RAZOR_LEAF"],[34,"GROWTH"],[41,"SLEEP_POWDER"],[48,"SOLARBEAM"]],"e":[2]},"2":{"n":"IVYSAUR","t":["grass","poison"],"s":[60,62,63,60,80,80],"m":["TACKLE","GROWL","LEECH_SEED"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[38,"GROWTH"],[46,"SLEEP_POWDER"],[54,"SOLARBEAM"]],"e":[3]},"3":{"n":"VENUSAUR","t":["grass","poison"],"s":[80,82,83,80,100,100],"m":["TACKLE","GROWL","LEECH_SEED","VINE_WHIP"],"l":[[7,"LEECH_SEED"],[13,"VINE_WHIP"],[22,"POISONPOWDER"],[30,"RAZOR_LEAF"],[43,"GROWTH"],[55,"SLEEP_POWDER"],[65,"SOLARBEAM"]],"e":[]},"4":{"n":"CHARMANDER","t":["fire"],"s":[39,52,43,65,60,50],"m":["SCRATCH","GROWL"],"l":[[9,"EMBER"],[15,"LEER"],[22,"RAGE"],[30,"SLASH"],[38,"FLAMETHROWER"],[46,"FIRE_SPIN"]],"e":[5]},"5":{"n":"CHARMELEON","t":["fire"],"s":[58,64,58,80,80,65],"m":["SCRATCH","GROWL","EMBER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[33,"SLASH"],[42,"FLAMETHROWER"],[56,"FIRE_SPIN"]],"e":[6]},"6":{"n":"CHARIZARD","t":["fire","flying"],"s":[78,84,78,100,109,85],"m":["SCRATCH","GROWL","EMBER","LEER"],"l":[[9,"EMBER"],[15,"LEER"],[24,"RAGE"],[36,"SLASH"],[46,"FLAMETHROWER"],[55,"FIRE_SPIN"]],"e":[]},"7":{"n":"SQUIRTLE","t":["water"],"s":[44,48,65,43,50,64],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[22,"BITE"],[28,"WITHDRAW"],[35,"SKULL_BASH"],[42,"HYDRO_PUMP"]],"e":[8]},"8":{"n":"WARTORTLE","t":["water"],"s":[59,63,80,58,65,80],"m":["TACKLE","TAIL_WHIP","BUBBLE"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[39,"SKULL_BASH"],[47,"HYDRO_PUMP"]],"e":[9]},"9":{"n":"BLASTOISE","t":["water"],"s":[79,83,100,78,85,105],"m":["TACKLE","TAIL_WHIP","BUBBLE","WATER_GUN"],"l":[[8,"BUBBLE"],[15,"WATER_GUN"],[24,"BITE"],[31,"WITHDRAW"],[42,"SKULL_BASH"],[52,"HYDRO_PUMP"]],"e":[]},"10":{"n":"CATERPIE","t":["bug"],"s":[45,30,35,45,20,20],"m":["TACKLE","STRING_SHOT"],"l":[],"e":[11]},"11":{"n":"METAPOD","t":["bug"],"s":[50,20,55,30,25,25],"m":["HARDEN"],"l":[],"e":[12]},"12":{"n":"BUTTERFREE","t":["bug","flying"],"s":[60,45,50,70,80,80],"m":["CONFUSION"],"l":[[12,"CONFUSION"],[15,"POISONPOWDER"],[16,"STUN_SPORE"],[17,"SLEEP_POWDER"],[21,"SUPERSONIC"],[26,"WHIRLWIND"],[32,"PSYBEAM"]],"e":[]},"13":{"n":"WEEDLE","t":["bug","poison"],"s":[40,35,30,50,20,20],"m":["POISON_STING","STRING_SHOT"],"l":[],"e":[14]},"14":{"n":"KAKUNA","t":["bug","poison"],"s":[45,25,50,35,25,25],"m":["HARDEN"],"l":[],"e":[15]},"15":{"n":"BEEDRILL","t":["bug","poison"],"s":[65,80,40,75,45,80],"m":["FURY_ATTACK"],"l":[[12,"FURY_ATTACK"],[16,"FOCUS_ENERGY"],[20,"TWINEEDLE"],[25,"RAGE"],[30,"PIN_MISSILE"],[35,"AGILITY"]],"e":[]},"16":{"n":"PIDGEY","t":["normal","flying"],"s":[40,45,40,56,35,35],"m":["GUST"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[19,"WHIRLWIND"],[28,"WING_ATTACK"],[36,"AGILITY"],[44,"MIRROR_MOVE"]],"e":[17]},"17":{"n":"PIDGEOTTO","t":["normal","flying"],"s":[63,60,55,71,50,50],"m":["GUST","SAND_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[40,"AGILITY"],[49,"MIRROR_MOVE"]],"e":[18]},"18":{"n":"PIDGEOT","t":["normal","flying"],"s":[83,80,75,91,70,70],"m":["GUST","SAND_ATTACK","QUICK_ATTACK"],"l":[[5,"SAND_ATTACK"],[12,"QUICK_ATTACK"],[21,"WHIRLWIND"],[31,"WING_ATTACK"],[44,"AGILITY"],[54,"MIRROR_MOVE"]],"e":[]},"19":{"n":"RATTATA","t":["normal"],"s":[30,56,35,72,25,35],"m":["TACKLE","TAIL_WHIP"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[23,"FOCUS_ENERGY"],[34,"SUPER_FANG"]],"e":[20]},"20":{"n":"RATICATE","t":["normal"],"s":[55,81,60,97,50,70],"m":["TACKLE","TAIL_WHIP","QUICK_ATTACK"],"l":[[7,"QUICK_ATTACK"],[14,"HYPER_FANG"],[27,"FOCUS_ENERGY"],[41,"SUPER_FANG"]],"e":[]},"21":{"n":"SPEAROW","t":["normal","flying"],"s":[40,60,30,70,31,31],"m":["PECK","GROWL"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[22,"MIRROR_MOVE"],[29,"DRILL_PECK"],[36,"AGILITY"]],"e":[22]},"22":{"n":"FEAROW","t":["normal","flying"],"s":[65,90,65,100,61,61],"m":["PECK","GROWL","LEER"],"l":[[9,"LEER"],[15,"FURY_ATTACK"],[25,"MIRROR_MOVE"],[34,"DRILL_PECK"],[43,"AGILITY"]],"e":[]},"23":{"n":"EKANS","t":["poison"],"s":[35,60,44,55,40,54],"m":["WRAP","LEER"],"l":[[10,"POISON_STING"],[17,"BITE"],[24,"GLARE"],[31,"SCREECH"],[38,"ACID"]],"e":[24]},"24":{"n":"ARBOK","t":["poison"],"s":[60,85,69,80,65,79],"m":["WRAP","LEER","POISON_STING"],"l":[[10,"POISON_STING"],[17,"BITE"],[27,"GLARE"],[36,"SCREECH"],[47,"ACID"]],"e":[]},"25":{"n":"PIKACHU","t":["electric"],"s":[35,55,30,90,50,40],"m":["THUNDERSHOCK","GROWL"],"l":[[9,"THUNDER_WAVE"],[16,"QUICK_ATTACK"],[26,"SWIFT"],[33,"AGILITY"],[43,"THUNDER"]],"e":[26]},"26":{"n":"RAICHU","t":["electric"],"s":[60,90,55,100,90,80],"m":["THUNDERSHOCK","GROWL","THUNDER_WAVE"],"l":[],"e":[]},"27":{"n":"SANDSHREW","t":["ground"],"s":[50,75,85,40,20,30],"m":["SCRATCH"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[24,"POISON_STING"],[31,"SWIFT"],[38,"FURY_SWIPES"]],"e":[28]},"28":{"n":"SANDSLASH","t":["ground"],"s":[75,100,110,65,45,55],"m":["SCRATCH","SAND_ATTACK"],"l":[[10,"SAND_ATTACK"],[17,"SLASH"],[27,"POISON_STING"],[36,"SWIFT"],[47,"FURY_SWIPES"]],"e":[]},"29":{"n":"NIDORAN-F","t":["poison"],"s":[55,47,52,41,40,40],"m":["GROWL","TACKLE"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[21,"TAIL_WHIP"],[29,"BITE"],[36,"FURY_SWIPES"],[43,"DOUBLE_KICK"]],"e":[30]},"30":{"n":"NIDORINA","t":["poison"],"s":[70,62,67,56,55,55],"m":["GROWL","TACKLE","SCRATCH"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"TAIL_WHIP"],[32,"BITE"],[41,"FURY_SWIPES"],[50,"DOUBLE_KICK"]],"e":[31]},"31":{"n":"NIDOQUEEN","t":["poison","ground"],"s":[90,82,87,76,75,85],"m":["TACKLE","SCRATCH","TAIL_WHIP","BODY_SLAM"],"l":[[8,"SCRATCH"],[14,"POISON_STING"],[23,"BODY_SLAM"]],"e":[]},"32":{"n":"NIDORAN-M","t":["poison"],"s":[46,57,40,50,40,40],"m":["LEER","TACKLE"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[21,"FOCUS_ENERGY"],[29,"FURY_ATTACK"],[36,"HORN_DRILL"],[43,"DOUBLE_KICK"]],"e":[33]},"33":{"n":"NIDORINO","t":["poison"],"s":[61,72,57,65,55,55],"m":["LEER","TACKLE","HORN_ATTACK"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"FOCUS_ENERGY"],[32,"FURY_ATTACK"],[41,"HORN_DRILL"],[50,"DOUBLE_KICK"]],"e":[34]},"34":{"n":"NIDOKING","t":["poison","ground"],"s":[81,92,77,85,85,75],"m":["TACKLE","HORN_ATTACK","POISON_STING","THRASH"],"l":[[8,"HORN_ATTACK"],[14,"POISON_STING"],[23,"THRASH"]],"e":[]},"35":{"n":"CLEFAIRY","t":["normal"],"s":[70,45,48,35,60,65],"m":["POUND","GROWL"],"l":[[13,"SING"],[18,"DOUBLESLAP"],[24,"MINIMIZE"],[31,"METRONOME"],[39,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"]],"e":[36]},"36":{"n":"CLEFABLE","t":["normal"],"s":[95,70,73,60,85,90],"m":["SING","DOUBLESLAP","MINIMIZE","METRONOME"],"l":[],"e":[]},"37":{"n":"VULPIX","t":["fire"],"s":[38,41,40,65,50,65],"m":["EMBER","TAIL_WHIP"],"l":[[16,"QUICK_ATTACK"],[21,"ROAR"],[28,"CONFUSE_RAY"],[35,"FLAMETHROWER"],[42,"FIRE_SPIN"]],"e":[38]},"38":{"n":"NINETALES","t":["fire"],"s":[73,76,75,100,81,100],"m":["EMBER","TAIL_WHIP","QUICK_ATTACK","ROAR"],"l":[],"e":[]},"39":{"n":"JIGGLYPUFF","t":["normal"],"s":[115,45,20,20,45,25],"m":["SING"],"l":[[9,"POUND"],[14,"DISABLE"],[19,"DEFENSE_CURL"],[24,"DOUBLESLAP"],[29,"REST"],[34,"BODY_SLAM"],[39,"DOUBLE_EDGE"]],"e":[40]},"40":{"n":"WIGGLYTUFF","t":["normal"],"s":[140,70,45,45,75,50],"m":["SING","DISABLE","DEFENSE_CURL","DOUBLESLAP"],"l":[],"e":[]},"41":{"n":"ZUBAT","t":["poison","flying"],"s":[40,45,35,55,30,40],"m":["LEECH_LIFE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[28,"WING_ATTACK"],[36,"HAZE"]],"e":[42]},"42":{"n":"GOLBAT","t":["poison","flying"],"s":[75,80,70,90,65,75],"m":["LEECH_LIFE","SCREECH","BITE"],"l":[[10,"SUPERSONIC"],[15,"BITE"],[21,"CONFUSE_RAY"],[32,"WING_ATTACK"],[43,"HAZE"]],"e":[169]},"43":{"n":"ODDISH","t":["grass","poison"],"s":[45,50,55,30,75,65],"m":["ABSORB"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[24,"ACID"],[33,"PETAL_DANCE"],[46,"SOLARBEAM"]],"e":[44]},"44":{"n":"GLOOM","t":["grass","poison"],"s":[60,65,70,40,85,75],"m":["ABSORB","POISONPOWDER","STUN_SPORE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"],[28,"ACID"],[38,"PETAL_DANCE"],[52,"SOLARBEAM"]],"e":[45,182]},"45":{"n":"VILEPLUME","t":["grass","poison"],"s":[75,80,85,50,110,90],"m":["STUN_SPORE","SLEEP_POWDER","ACID","PETAL_DANCE"],"l":[[15,"POISONPOWDER"],[17,"STUN_SPORE"],[19,"SLEEP_POWDER"]],"e":[]},"46":{"n":"PARAS","t":["bug","grass"],"s":[35,70,55,25,40,55],"m":["SCRATCH"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[27,"SPORE"],[34,"SLASH"],[41,"GROWTH"]],"e":[47]},"47":{"n":"PARASECT","t":["bug","grass"],"s":[60,95,80,30,60,80],"m":["SCRATCH","STUN_SPORE","LEECH_LIFE"],"l":[[13,"STUN_SPORE"],[20,"LEECH_LIFE"],[30,"SPORE"],[39,"SLASH"],[48,"GROWTH"]],"e":[]},"48":{"n":"VENONAT","t":["bug","poison"],"s":[60,55,50,45,40,55],"m":["TACKLE","DISABLE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[35,"PSYBEAM"],[38,"SLEEP_POWDER"],[43,"PSYCHIC_M"]],"e":[49]},"49":{"n":"VENOMOTH","t":["bug","poison"],"s":[70,65,60,90,90,75],"m":["TACKLE","DISABLE","POISONPOWDER","LEECH_LIFE"],"l":[[24,"POISONPOWDER"],[27,"LEECH_LIFE"],[30,"STUN_SPORE"],[38,"PSYBEAM"],[43,"SLEEP_POWDER"],[50,"PSYCHIC_M"]],"e":[]},"50":{"n":"DIGLETT","t":["ground"],"s":[10,55,25,95,35,45],"m":["SCRATCH"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[31,"SLASH"],[40,"EARTHQUAKE"]],"e":[51]},"51":{"n":"DUGTRIO","t":["ground"],"s":[35,80,50,120,50,70],"m":["SCRATCH","GROWL","DIG"],"l":[[15,"GROWL"],[19,"DIG"],[24,"SAND_ATTACK"],[35,"SLASH"],[47,"EARTHQUAKE"]],"e":[]},"52":{"n":"MEOWTH","t":["normal"],"s":[40,45,35,90,40,40],"m":["SCRATCH","GROWL"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[33,"FURY_SWIPES"],[44,"SLASH"]],"e":[53]},"53":{"n":"PERSIAN","t":["normal"],"s":[65,70,60,115,65,65],"m":["SCRATCH","GROWL","BITE","SCREECH"],"l":[[12,"BITE"],[17,"PAY_DAY"],[24,"SCREECH"],[37,"FURY_SWIPES"],[51,"SLASH"]],"e":[]},"54":{"n":"PSYDUCK","t":["water"],"s":[50,52,48,55,65,50],"m":["SCRATCH"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[36,"CONFUSION"],[43,"FURY_SWIPES"],[52,"HYDRO_PUMP"]],"e":[55]},"55":{"n":"GOLDUCK","t":["water"],"s":[80,82,78,85,95,80],"m":["SCRATCH","TAIL_WHIP","DISABLE"],"l":[[28,"TAIL_WHIP"],[31,"DISABLE"],[39,"CONFUSION"],[48,"FURY_SWIPES"],[59,"HYDRO_PUMP"]],"e":[]},"56":{"n":"MANKEY","t":["fighting"],"s":[40,80,35,70,35,45],"m":["SCRATCH","LEER"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[33,"SEISMIC_TOSS"],[39,"THRASH"]],"e":[57]},"57":{"n":"PRIMEAPE","t":["fighting"],"s":[65,105,60,95,60,70],"m":["SCRATCH","LEER","KARATE_CHOP","FURY_SWIPES"],"l":[[15,"KARATE_CHOP"],[21,"FURY_SWIPES"],[27,"FOCUS_ENERGY"],[37,"SEISMIC_TOSS"],[46,"THRASH"]],"e":[]},"58":{"n":"GROWLITHE","t":["fire"],"s":[55,70,45,60,70,50],"m":["BITE","ROAR"],"l":[[18,"EMBER"],[23,"LEER"],[30,"TAKE_DOWN"],[39,"AGILITY"],[50,"FLAMETHROWER"]],"e":[59]},"59":{"n":"ARCANINE","t":["fire"],"s":[90,110,80,95,100,80],"m":["ROAR","EMBER","LEER","TAKE_DOWN"],"l":[],"e":[]},"60":{"n":"POLIWAG","t":["water"],"s":[40,50,40,90,40,40],"m":["BUBBLE"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[25,"DOUBLESLAP"],[31,"BODY_SLAM"],[38,"AMNESIA"],[45,"HYDRO_PUMP"]],"e":[61]},"61":{"n":"POLIWHIRL","t":["water"],"s":[65,65,65,90,50,50],"m":["BUBBLE","HYPNOSIS","WATER_GUN"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"],[26,"DOUBLESLAP"],[33,"BODY_SLAM"],[41,"AMNESIA"],[49,"HYDRO_PUMP"]],"e":[62,186]},"62":{"n":"POLIWRATH","t":["water","fighting"],"s":[90,85,95,70,70,90],"m":["HYPNOSIS","WATER_GUN","DOUBLESLAP","BODY_SLAM"],"l":[[16,"HYPNOSIS"],[19,"WATER_GUN"]],"e":[]},"63":{"n":"ABRA","t":["psychic"],"s":[25,20,15,90,105,55],"m":["TELEPORT"],"l":[],"e":[64]},"64":{"n":"KADABRA","t":["psychic"],"s":[40,35,30,105,120,70],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[65]},"65":{"n":"ALAKAZAM","t":["psychic"],"s":[55,50,45,120,135,85],"m":["TELEPORT","CONFUSION","DISABLE"],"l":[[16,"CONFUSION"],[20,"DISABLE"],[27,"PSYBEAM"],[31,"RECOVER"],[38,"PSYCHIC_M"],[42,"REFLECT"]],"e":[]},"66":{"n":"MACHOP","t":["fighting"],"s":[70,80,50,35,35,35],"m":["KARATE_CHOP"],"l":[[20,"LOW_KICK"],[25,"LEER"],[32,"FOCUS_ENERGY"],[39,"SEISMIC_TOSS"],[46,"SUBMISSION"]],"e":[67]},"67":{"n":"MACHOKE","t":["fighting"],"s":[80,100,70,45,50,60],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[68]},"68":{"n":"MACHAMP","t":["fighting"],"s":[90,130,80,55,65,85],"m":["KARATE_CHOP","LOW_KICK","LEER"],"l":[[20,"LOW_KICK"],[25,"LEER"],[36,"FOCUS_ENERGY"],[44,"SEISMIC_TOSS"],[52,"SUBMISSION"]],"e":[]},"69":{"n":"BELLSPROUT","t":["grass","poison"],"s":[50,75,35,40,70,30],"m":["VINE_WHIP","GROWTH"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[21,"STUN_SPORE"],[26,"ACID"],[33,"RAZOR_LEAF"],[42,"SLAM"]],"e":[70]},"70":{"n":"WEEPINBELL","t":["grass","poison"],"s":[65,90,50,55,85,45],"m":["VINE_WHIP","GROWTH","WRAP"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"],[23,"STUN_SPORE"],[29,"ACID"],[38,"RAZOR_LEAF"],[49,"SLAM"]],"e":[71]},"71":{"n":"VICTREEBEL","t":["grass","poison"],"s":[80,105,65,70,100,60],"m":["SLEEP_POWDER","STUN_SPORE","ACID","RAZOR_LEAF"],"l":[[13,"WRAP"],[15,"POISONPOWDER"],[18,"SLEEP_POWDER"]],"e":[]},"72":{"n":"TENTACOOL","t":["water","poison"],"s":[40,40,35,70,50,100],"m":["ACID"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[33,"BARRIER"],[40,"SCREECH"],[48,"HYDRO_PUMP"]],"e":[73]},"73":{"n":"TENTACRUEL","t":["water","poison"],"s":[80,70,65,100,80,120],"m":["ACID","SUPERSONIC","WRAP"],"l":[[7,"SUPERSONIC"],[13,"WRAP"],[18,"POISON_STING"],[22,"WATER_GUN"],[27,"CONSTRICT"],[35,"BARRIER"],[43,"SCREECH"],[50,"HYDRO_PUMP"]],"e":[]},"74":{"n":"GEODUDE","t":["rock","ground"],"s":[40,80,100,20,30,30],"m":["TACKLE"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[26,"HARDEN"],[31,"EARTHQUAKE"],[36,"EXPLOSION"]],"e":[75]},"75":{"n":"GRAVELER","t":["rock","ground"],"s":[55,95,115,35,45,45],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[76]},"76":{"n":"GOLEM","t":["rock","ground"],"s":[80,110,130,45,55,65],"m":["TACKLE","DEFENSE_CURL"],"l":[[11,"DEFENSE_CURL"],[16,"ROCK_THROW"],[21,"SELFDESTRUCT"],[29,"HARDEN"],[36,"EARTHQUAKE"],[43,"EXPLOSION"]],"e":[]},"77":{"n":"PONYTA","t":["fire"],"s":[50,85,55,90,65,65],"m":["EMBER"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[43,"TAKE_DOWN"],[48,"AGILITY"]],"e":[78]},"78":{"n":"RAPIDASH","t":["fire"],"s":[65,100,70,105,80,80],"m":["EMBER","TAIL_WHIP","STOMP","GROWL"],"l":[[30,"TAIL_WHIP"],[32,"STOMP"],[35,"GROWL"],[39,"FIRE_SPIN"],[47,"TAKE_DOWN"],[55,"AGILITY"]],"e":[]},"79":{"n":"SLOWPOKE","t":["water","psychic"],"s":[90,65,65,15,40,40],"m":["CONFUSION"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[40,"AMNESIA"],[48,"PSYCHIC_M"]],"e":[80,199]},"80":{"n":"SLOWBRO","t":["water","psychic"],"s":[95,75,110,30,100,80],"m":["CONFUSION","DISABLE","HEADBUTT"],"l":[[18,"DISABLE"],[22,"HEADBUTT"],[27,"GROWL"],[33,"WATER_GUN"],[37,"WITHDRAW"],[44,"AMNESIA"],[55,"PSYCHIC_M"]],"e":[]},"81":{"n":"MAGNEMITE","t":["electric","steel"],"s":[25,35,70,45,95,55],"m":["TACKLE"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[35,"THUNDER_WAVE"],[41,"SWIFT"],[47,"SCREECH"]],"e":[82]},"82":{"n":"MAGNETON","t":["electric","steel"],"s":[50,60,95,70,120,70],"m":["TACKLE","SONICBOOM","THUNDERSHOCK"],"l":[[21,"SONICBOOM"],[25,"THUNDERSHOCK"],[29,"SUPERSONIC"],[38,"THUNDER_WAVE"],[46,"SWIFT"],[54,"SCREECH"]],"e":[]},"83":{"n":"FARFETCHD","t":["normal","flying"],"s":[52,65,55,60,58,62],"m":["PECK","SAND_ATTACK"],"l":[[7,"LEER"],[15,"FURY_ATTACK"],[23,"SWORDS_DANCE"],[31,"AGILITY"],[39,"SLASH"]],"e":[]},"84":{"n":"DODUO","t":["normal","flying"],"s":[35,85,45,75,35,35],"m":["PECK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[36,"RAGE"],[40,"TRI_ATTACK"],[44,"AGILITY"]],"e":[85]},"85":{"n":"DODRIO","t":["normal","flying"],"s":[60,110,70,100,60,60],"m":["PECK","GROWL","FURY_ATTACK"],"l":[[20,"GROWL"],[24,"FURY_ATTACK"],[30,"DRILL_PECK"],[39,"RAGE"],[45,"TRI_ATTACK"],[51,"AGILITY"]],"e":[]},"86":{"n":"SEEL","t":["water"],"s":[65,45,55,45,45,70],"m":["HEADBUTT"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[40,"REST"],[45,"TAKE_DOWN"],[50,"ICE_BEAM"]],"e":[87]},"87":{"n":"DEWGONG","t":["water","ice"],"s":[90,70,80,70,70,95],"m":["HEADBUTT","GROWL","AURORA_BEAM"],"l":[[30,"GROWL"],[35,"AURORA_BEAM"],[44,"REST"],[50,"TAKE_DOWN"],[56,"ICE_BEAM"]],"e":[]},"88":{"n":"GRIMER","t":["poison"],"s":[80,80,50,25,40,50],"m":["POUND","DISABLE"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[42,"HARDEN"],[48,"SCREECH"],[55,"ACID_ARMOR"]],"e":[89]},"89":{"n":"MUK","t":["poison"],"s":[105,105,75,50,65,100],"m":["POUND","DISABLE","POISON_GAS"],"l":[[30,"POISON_GAS"],[33,"MINIMIZE"],[37,"SLUDGE"],[45,"HARDEN"],[53,"SCREECH"],[60,"ACID_ARMOR"]],"e":[]},"90":{"n":"SHELLDER","t":["water"],"s":[30,65,100,40,45,25],"m":["TACKLE","WITHDRAW"],"l":[[18,"SUPERSONIC"],[23,"CLAMP"],[30,"AURORA_BEAM"],[39,"LEER"],[50,"ICE_BEAM"]],"e":[91]},"91":{"n":"CLOYSTER","t":["water","ice"],"s":[50,95,180,70,85,45],"m":["WITHDRAW","SUPERSONIC","CLAMP","AURORA_BEAM"],"l":[[50,"SPIKE_CANNON"]],"e":[]},"92":{"n":"GASTLY","t":["ghost","poison"],"s":[30,35,30,80,100,35],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[27,"HYPNOSIS"],[35,"DREAM_EATER"]],"e":[93]},"93":{"n":"HAUNTER","t":["ghost","poison"],"s":[45,50,45,95,115,55],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[94]},"94":{"n":"GENGAR","t":["ghost","poison"],"s":[60,65,60,110,130,75],"m":["LICK","CONFUSE_RAY","NIGHT_SHADE"],"l":[[29,"HYPNOSIS"],[38,"DREAM_EATER"]],"e":[]},"95":{"n":"ONIX","t":["rock","ground"],"s":[35,45,160,70,30,45],"m":["TACKLE","SCREECH"],"l":[[15,"BIND"],[19,"ROCK_THROW"],[25,"RAGE"],[33,"SLAM"],[43,"HARDEN"]],"e":[208]},"96":{"n":"DROWZEE","t":["psychic"],"s":[60,48,45,42,43,90],"m":["POUND","HYPNOSIS"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[29,"POISON_GAS"],[32,"PSYCHIC_M"],[37,"MEDITATE"]],"e":[97]},"97":{"n":"HYPNO","t":["psychic"],"s":[85,73,70,67,73,115],"m":["POUND","HYPNOSIS","DISABLE","CONFUSION"],"l":[[12,"DISABLE"],[17,"CONFUSION"],[24,"HEADBUTT"],[33,"POISON_GAS"],[37,"PSYCHIC_M"],[43,"MEDITATE"]],"e":[]},"98":{"n":"KRABBY","t":["water"],"s":[30,105,90,50,25,25],"m":["BUBBLE","LEER"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[30,"STOMP"],[35,"CRABHAMMER"],[40,"HARDEN"]],"e":[99]},"99":{"n":"KINGLER","t":["water"],"s":[55,130,115,75,50,50],"m":["BUBBLE","LEER","VICEGRIP"],"l":[[20,"VICEGRIP"],[25,"GUILLOTINE"],[34,"STOMP"],[42,"CRABHAMMER"],[49,"HARDEN"]],"e":[]},"100":{"n":"VOLTORB","t":["electric"],"s":[40,30,50,100,55,55],"m":["TACKLE","SCREECH"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[36,"SWIFT"],[43,"EXPLOSION"]],"e":[101]},"101":{"n":"ELECTRODE","t":["electric"],"s":[60,50,70,140,80,80],"m":["TACKLE","SCREECH","SONICBOOM"],"l":[[17,"SONICBOOM"],[22,"SELFDESTRUCT"],[29,"LIGHT_SCREEN"],[40,"SWIFT"],[50,"EXPLOSION"]],"e":[]},"102":{"n":"EXEGGCUTE","t":["grass","psychic"],"s":[60,40,80,40,60,45],"m":["BARRAGE","HYPNOSIS"],"l":[[25,"REFLECT"],[28,"LEECH_SEED"],[32,"STUN_SPORE"],[37,"POISONPOWDER"],[42,"SOLARBEAM"],[48,"SLEEP_POWDER"]],"e":[103]},"103":{"n":"EXEGGUTOR","t":["grass","psychic"],"s":[95,95,85,55,125,65],"m":["BARRAGE","HYPNOSIS"],"l":[[28,"STOMP"]],"e":[]},"104":{"n":"CUBONE","t":["ground"],"s":[50,50,95,35,40,50],"m":["BONE_CLUB","GROWL"],"l":[[25,"LEER"],[31,"FOCUS_ENERGY"],[38,"THRASH"],[43,"BONEMERANG"],[46,"RAGE"]],"e":[105]},"105":{"n":"MAROWAK","t":["ground"],"s":[60,80,110,45,50,80],"m":["BONE_CLUB","GROWL","LEER","FOCUS_ENERGY"],"l":[[25,"LEER"],[33,"FOCUS_ENERGY"],[41,"THRASH"],[48,"BONEMERANG"],[55,"RAGE"]],"e":[]},"106":{"n":"HITMONLEE","t":["fighting"],"s":[50,120,53,87,35,110],"m":["DOUBLE_KICK","MEDITATE"],"l":[[33,"ROLLING_KICK"],[38,"JUMP_KICK"],[43,"FOCUS_ENERGY"],[48,"HI_JUMP_KICK"],[53,"MEGA_KICK"]],"e":[]},"107":{"n":"HITMONCHAN","t":["fighting"],"s":[50,105,79,76,35,110],"m":["COMET_PUNCH","AGILITY"],"l":[[33,"FIRE_PUNCH"],[38,"ICE_PUNCH"],[43,"THUNDERPUNCH"],[48,"MEGA_PUNCH"],[53,"COUNTER"]],"e":[]},"108":{"n":"LICKITUNG","t":["normal"],"s":[90,55,75,30,60,75],"m":["WRAP","SUPERSONIC"],"l":[[7,"STOMP"],[15,"DISABLE"],[23,"DEFENSE_CURL"],[31,"SLAM"],[39,"SCREECH"]],"e":[]},"109":{"n":"KOFFING","t":["poison"],"s":[40,65,95,35,60,45],"m":["TACKLE","SMOG"],"l":[[32,"SLUDGE"],[37,"SMOKESCREEN"],[40,"SELFDESTRUCT"],[45,"HAZE"],[48,"EXPLOSION"]],"e":[110]},"110":{"n":"WEEZING","t":["poison"],"s":[65,90,120,60,85,70],"m":["TACKLE","SMOG","SLUDGE"],"l":[[32,"SLUDGE"],[39,"SMOKESCREEN"],[43,"SELFDESTRUCT"],[49,"HAZE"],[53,"EXPLOSION"]],"e":[]},"111":{"n":"RHYHORN","t":["ground","rock"],"s":[80,85,95,25,30,30],"m":["HORN_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[45,"HORN_DRILL"],[50,"LEER"],[55,"TAKE_DOWN"]],"e":[112]},"112":{"n":"RHYDON","t":["ground","rock"],"s":[105,130,120,40,45,45],"m":["HORN_ATTACK","STOMP","TAIL_WHIP","FURY_ATTACK"],"l":[[30,"STOMP"],[35,"TAIL_WHIP"],[40,"FURY_ATTACK"],[48,"HORN_DRILL"],[55,"LEER"],[64,"TAKE_DOWN"]],"e":[]},"113":{"n":"CHANSEY","t":["normal"],"s":[250,5,5,50,35,105],"m":["POUND","DOUBLESLAP"],"l":[[24,"SING"],[30,"GROWL"],[38,"MINIMIZE"],[44,"DEFENSE_CURL"],[48,"LIGHT_SCREEN"],[54,"DOUBLE_EDGE"]],"e":[242]},"114":{"n":"TANGELA","t":["grass"],"s":[65,55,115,60,100,40],"m":["CONSTRICT","BIND"],"l":[[29,"ABSORB"],[32,"POISONPOWDER"],[36,"STUN_SPORE"],[39,"SLEEP_POWDER"],[45,"SLAM"],[49,"GROWTH"]],"e":[]},"115":{"n":"KANGASKHAN","t":["normal"],"s":[105,95,80,90,40,80],"m":["COMET_PUNCH","RAGE"],"l":[[26,"BITE"],[31,"TAIL_WHIP"],[36,"MEGA_PUNCH"],[41,"LEER"],[46,"DIZZY_PUNCH"]],"e":[]},"116":{"n":"HORSEA","t":["water"],"s":[30,40,70,60,70,25],"m":["BUBBLE"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[37,"AGILITY"],[45,"HYDRO_PUMP"]],"e":[117]},"117":{"n":"SEADRA","t":["water"],"s":[55,65,95,85,95,45],"m":["BUBBLE","SMOKESCREEN"],"l":[[19,"SMOKESCREEN"],[24,"LEER"],[30,"WATER_GUN"],[41,"AGILITY"],[52,"HYDRO_PUMP"]],"e":[230]},"118":{"n":"GOLDEEN","t":["water"],"s":[45,67,60,63,35,50],"m":["PECK","TAIL_WHIP"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[37,"WATERFALL"],[45,"HORN_DRILL"],[54,"AGILITY"]],"e":[119]},"119":{"n":"SEAKING","t":["water"],"s":[80,92,65,68,65,80],"m":["PECK","TAIL_WHIP","SUPERSONIC"],"l":[[19,"SUPERSONIC"],[24,"HORN_ATTACK"],[30,"FURY_ATTACK"],[39,"WATERFALL"],[48,"HORN_DRILL"],[54,"AGILITY"]],"e":[]},"120":{"n":"STARYU","t":["water"],"s":[30,45,55,85,70,55],"m":["TACKLE"],"l":[[17,"WATER_GUN"],[22,"HARDEN"],[27,"RECOVER"],[32,"SWIFT"],[37,"MINIMIZE"],[42,"LIGHT_SCREEN"],[47,"HYDRO_PUMP"]],"e":[121]},"121":{"n":"STARMIE","t":["water","psychic"],"s":[60,75,85,115,100,85],"m":["TACKLE","WATER_GUN","HARDEN"],"l":[],"e":[]},"122":{"n":"MR-MIME","t":["psychic"],"s":[40,45,65,90,100,120],"m":["CONFUSION","BARRIER"],"l":[[15,"CONFUSION"],[23,"LIGHT_SCREEN"],[31,"DOUBLESLAP"],[39,"MEDITATE"],[47,"SUBSTITUTE"]],"e":[]},"123":{"n":"SCYTHER","t":["bug","flying"],"s":[70,110,80,105,55,80],"m":["QUICK_ATTACK"],"l":[[17,"LEER"],[20,"FOCUS_ENERGY"],[24,"DOUBLE_TEAM"],[29,"SLASH"],[35,"SWORDS_DANCE"],[42,"AGILITY"]],"e":[212]},"124":{"n":"JYNX","t":["ice","psychic"],"s":[65,50,35,95,115,95],"m":["POUND","LOVELY_KISS"],"l":[[18,"LICK"],[23,"DOUBLESLAP"],[31,"ICE_PUNCH"],[39,"BODY_SLAM"],[47,"THRASH"],[58,"BLIZZARD"]],"e":[]},"125":{"n":"ELECTABUZZ","t":["electric"],"s":[65,83,57,105,95,85],"m":["QUICK_ATTACK","LEER"],"l":[[34,"THUNDERSHOCK"],[37,"SCREECH"],[42,"THUNDERPUNCH"],[49,"LIGHT_SCREEN"],[54,"THUNDER"]],"e":[]},"126":{"n":"MAGMAR","t":["fire"],"s":[65,95,57,93,100,85],"m":["EMBER"],"l":[[36,"LEER"],[39,"CONFUSE_RAY"],[43,"FIRE_PUNCH"],[48,"SMOKESCREEN"],[52,"SMOG"],[55,"FLAMETHROWER"]],"e":[]},"127":{"n":"PINSIR","t":["bug"],"s":[65,125,100,85,55,70],"m":["VICEGRIP"],"l":[[25,"SEISMIC_TOSS"],[30,"GUILLOTINE"],[36,"FOCUS_ENERGY"],[43,"HARDEN"],[49,"SLASH"],[54,"SWORDS_DANCE"]],"e":[]},"128":{"n":"TAUROS","t":["normal"],"s":[75,100,95,110,40,70],"m":["TACKLE"],"l":[[21,"STOMP"],[28,"TAIL_WHIP"],[35,"LEER"],[44,"RAGE"],[51,"TAKE_DOWN"]],"e":[]},"129":{"n":"MAGIKARP","t":["water"],"s":[20,10,55,80,15,20],"m":["SPLASH"],"l":[[15,"TACKLE"]],"e":[130]},"130":{"n":"GYARADOS","t":["water","flying"],"s":[95,125,79,81,60,100],"m":["BITE","DRAGON_RAGE","LEER","HYDRO_PUMP"],"l":[[20,"BITE"],[25,"DRAGON_RAGE"],[32,"LEER"],[41,"HYDRO_PUMP"],[52,"HYPER_BEAM"]],"e":[]},"131":{"n":"LAPRAS","t":["water","ice"],"s":[130,85,80,60,85,95],"m":["WATER_GUN","GROWL"],"l":[[16,"SING"],[20,"MIST"],[25,"BODY_SLAM"],[31,"CONFUSE_RAY"],[38,"ICE_BEAM"],[46,"HYDRO_PUMP"]],"e":[]},"132":{"n":"DITTO","t":["normal"],"s":[48,48,48,48,48,48],"m":["TRANSFORM"],"l":[],"e":[]},"133":{"n":"EEVEE","t":["normal"],"s":[55,55,50,55,45,65],"m":["TACKLE","SAND_ATTACK"],"l":[[27,"QUICK_ATTACK"],[31,"TAIL_WHIP"],[37,"BITE"],[45,"TAKE_DOWN"]],"e":[134,135,136,196,197]},"134":{"n":"VAPOREON","t":["water"],"s":[130,65,60,65,110,95],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","WATER_GUN"],"l":[[27,"QUICK_ATTACK"],[31,"WATER_GUN"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"ACID_ARMOR"],[44,"HAZE"],[48,"MIST"],[54,"HYDRO_PUMP"]],"e":[]},"135":{"n":"JOLTEON","t":["electric"],"s":[65,65,60,130,110,95],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","THUNDERSHOCK"],"l":[[27,"QUICK_ATTACK"],[31,"THUNDERSHOCK"],[37,"TAIL_WHIP"],[40,"THUNDER_WAVE"],[42,"DOUBLE_KICK"],[44,"AGILITY"],[48,"PIN_MISSILE"],[54,"THUNDER"]],"e":[]},"136":{"n":"FLAREON","t":["fire"],"s":[65,130,60,65,95,110],"m":["TACKLE","SAND_ATTACK","QUICK_ATTACK","EMBER"],"l":[[27,"QUICK_ATTACK"],[31,"EMBER"],[37,"TAIL_WHIP"],[40,"BITE"],[42,"LEER"],[44,"FIRE_SPIN"],[48,"RAGE"],[54,"FLAMETHROWER"]],"e":[]},"137":{"n":"PORYGON","t":["normal"],"s":[65,60,70,40,85,75],"m":["TACKLE","SHARPEN","CONVERSION"],"l":[[23,"PSYBEAM"],[28,"RECOVER"],[35,"AGILITY"],[42,"TRI_ATTACK"]],"e":[233]},"138":{"n":"OMANYTE","t":["rock","water"],"s":[35,40,100,35,90,55],"m":["WATER_GUN","WITHDRAW"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[46,"SPIKE_CANNON"],[53,"HYDRO_PUMP"]],"e":[139]},"139":{"n":"OMASTAR","t":["rock","water"],"s":[70,60,125,55,115,70],"m":["WATER_GUN","WITHDRAW","HORN_ATTACK"],"l":[[34,"HORN_ATTACK"],[39,"LEER"],[44,"SPIKE_CANNON"],[49,"HYDRO_PUMP"]],"e":[]},"140":{"n":"KABUTO","t":["rock","water"],"s":[30,80,90,55,35,45],"m":["SCRATCH","HARDEN"],"l":[[34,"ABSORB"],[39,"SLASH"],[44,"LEER"],[49,"HYDRO_PUMP"]],"e":[141]},"141":{"n":"KABUTOPS","t":["rock","water"],"s":[60,115,105,80,65,70],"m":["SCRATCH","HARDEN","ABSORB"],"l":[[34,"ABSORB"],[39,"SLASH"],[46,"LEER"],[53,"HYDRO_PUMP"]],"e":[]},"142":{"n":"AERODACTYL","t":["rock","flying"],"s":[80,105,65,130,60,75],"m":["WING_ATTACK","AGILITY"],"l":[[33,"SUPERSONIC"],[38,"BITE"],[45,"TAKE_DOWN"],[54,"HYPER_BEAM"]],"e":[]},"143":{"n":"SNORLAX","t":["normal"],"s":[160,110,65,30,65,110],"m":["HEADBUTT","AMNESIA","REST"],"l":[[35,"BODY_SLAM"],[41,"HARDEN"],[48,"DOUBLE_EDGE"],[56,"HYPER_BEAM"]],"e":[]},"144":{"n":"ARTICUNO","t":["ice","flying"],"s":[90,85,100,85,95,125],"m":["PECK","ICE_BEAM"],"l":[[51,"BLIZZARD"],[55,"AGILITY"],[60,"MIST"]],"e":[]},"145":{"n":"ZAPDOS","t":["electric","flying"],"s":[90,90,85,100,125,90],"m":["THUNDERSHOCK","DRILL_PECK"],"l":[[51,"THUNDER"],[55,"AGILITY"],[60,"LIGHT_SCREEN"]],"e":[]},"146":{"n":"MOLTRES","t":["fire","flying"],"s":[90,100,90,90,125,85],"m":["PECK","FIRE_SPIN"],"l":[[51,"LEER"],[55,"AGILITY"],[60,"SKY_ATTACK"]],"e":[]},"147":{"n":"DRATINI","t":["dragon"],"s":[41,64,45,50,50,50],"m":["WRAP","LEER"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[30,"SLAM"],[40,"DRAGON_RAGE"],[50,"HYPER_BEAM"]],"e":[148]},"148":{"n":"DRAGONAIR","t":["dragon"],"s":[61,84,65,70,70,70],"m":["WRAP","LEER","THUNDER_WAVE"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[55,"HYPER_BEAM"]],"e":[149]},"149":{"n":"DRAGONITE","t":["dragon","flying"],"s":[91,134,95,80,100,100],"m":["WRAP","LEER","THUNDER_WAVE","AGILITY"],"l":[[10,"THUNDER_WAVE"],[20,"AGILITY"],[35,"SLAM"],[45,"DRAGON_RAGE"],[60,"HYPER_BEAM"]],"e":[]},"150":{"n":"MEWTWO","t":["psychic"],"s":[106,110,90,130,154,90],"m":["CONFUSION","DISABLE","SWIFT","PSYCHIC_M"],"l":[[63,"BARRIER"],[66,"PSYCHIC_M"],[70,"RECOVER"],[75,"MIST"],[81,"AMNESIA"]],"e":[]},"151":{"n":"MEW","t":["psychic"],"s":[100,100,100,100,100,100],"m":["POUND"],"l":[[10,"TRANSFORM"],[20,"MEGA_PUNCH"],[30,"METRONOME"],[40,"PSYCHIC_M"]],"e":[]},"152":{"n":"CHIKORITA","t":["grass"],"s":[45,49,65,45,49,65],"e":[153],"m":["TACKLE","GROWL"],"l":[[8,"RAZOR_LEAF"],[12,"REFLECT"],[15,"POISONPOWDER"],[22,"SYNTHESIS"],[29,"BODY_SLAM"],[36,"LIGHT_SCREEN"],[43,"SAFEGUARD"],[50,"SOLARBEAM"]]},"153":{"n":"BAYLEEF","t":["grass"],"s":[60,62,80,60,63,80],"e":[154],"m":["TACKLE","GROWL","RAZOR_LEAF","REFLECT"],"l":[[15,"POISONPOWDER"],[22,"SYNTHESIS"],[31,"BODY_SLAM"],[40,"LIGHT_SCREEN"],[51,"SAFEGUARD"],[60,"SOLARBEAM"]]},"154":{"n":"MEGANIUM","t":["grass"],"s":[80,82,100,80,83,100],"e":[],"m":["TACKLE","GROWL","RAZOR_LEAF","REFLECT"],"l":[[15,"POISONPOWDER"],[22,"SYNTHESIS"],[31,"BODY_SLAM"],[41,"LIGHT_SCREEN"],[54,"SAFEGUARD"],[65,"SOLARBEAM"]]},"155":{"n":"CYNDAQUIL","t":["fire"],"s":[39,52,43,65,60,50],"e":[156],"m":["TACKLE","LEER"],"l":[[6,"SMOKESCREEN"],[12,"EMBER"],[19,"QUICK_ATTACK"],[27,"FLAME_WHEEL"],[36,"SWIFT"],[46,"FLAMETHROWER"]]},"156":{"n":"QUILAVA","t":["fire"],"s":[58,64,58,80,80,65],"e":[157],"m":["TACKLE","LEER","SMOKESCREEN","EMBER"],"l":[[24,"QUICK_ATTACK"],[31,"FLAME_WHEEL"],[40,"SWIFT"],[48,"FLAMETHROWER"]]},"157":{"n":"TYPHLOSION","t":["fire"],"s":[78,84,78,100,109,85],"e":[],"m":["TACKLE","LEER","SMOKESCREEN","EMBER"],"l":[[24,"QUICK_ATTACK"],[31,"FLAME_WHEEL"],[43,"SWIFT"],[53,"FLAMETHROWER"]]},"158":{"n":"TOTODILE","t":["water"],"s":[50,65,64,43,44,48],"e":[159],"m":["SCRATCH","LEER"],"l":[[7,"RAGE"],[13,"WATER_GUN"],[20,"BITE"],[27,"SCARY_FACE"],[35,"SLASH"],[43,"SCREECH"],[52,"HYDRO_PUMP"]]},"159":{"n":"CROCONAW","t":["water"],"s":[65,80,80,58,59,63],"e":[160],"m":["SCRATCH","LEER","RAGE","WATER_GUN"],"l":[[21,"BITE"],[28,"SCARY_FACE"],[37,"SLASH"],[45,"SCREECH"],[55,"HYDRO_PUMP"]]},"160":{"n":"FERALIGATR","t":["water"],"s":[85,105,100,78,79,83],"e":[],"m":["SCRATCH","LEER","RAGE","WATER_GUN"],"l":[[21,"BITE"],[28,"SCARY_FACE"],[38,"SLASH"],[47,"SCREECH"],[58,"HYDRO_PUMP"]]},"161":{"n":"SENTRET","t":["normal"],"s":[35,46,34,20,35,45],"e":[162],"m":["SCRATCH"],"l":[[4,"DEFENSE_CURL"],[7,"QUICK_ATTACK"],[12,"FURY_SWIPES"],[17,"SLAM"],[24,"FLAIL"],[31,"REST"],[40,"AMNESIA"]]},"162":{"n":"FURRET","t":["normal"],"s":[85,76,64,90,45,55],"e":[],"m":["SCRATCH","DEFENSE_CURL","QUICK_ATTACK","FURY_SWIPES"],"l":[[19,"SLAM"],[28,"FLAIL"],[37,"REST"],[48,"AMNESIA"]]},"163":{"n":"HOOTHOOT","t":["normal","flying"],"s":[60,30,30,50,36,56],"e":[164],"m":["TACKLE","GROWL"],"l":[[6,"FORESIGHT"],[11,"PECK"],[16,"HYPNOSIS"],[22,"REFLECT"],[28,"TAKE_DOWN"],[34,"CONFUSION"],[48,"DREAM_EATER"]]},"164":{"n":"NOCTOWL","t":["normal","flying"],"s":[100,50,50,70,76,96],"e":[],"m":["TACKLE","GROWL","FORESIGHT","PECK"],"l":[[25,"HYPNOSIS"],[33,"REFLECT"],[41,"TAKE_DOWN"],[49,"CONFUSION"],[57,"DREAM_EATER"]]},"165":{"n":"LEDYBA","t":["bug","flying"],"s":[40,20,30,55,40,80],"e":[166],"m":["TACKLE"],"l":[[8,"SUPERSONIC"],[15,"COMET_PUNCH"],[22,"LIGHT_SCREEN"],[24,"REFLECT"],[26,"SAFEGUARD"],[29,"BATON_PASS"],[36,"SWIFT"],[43,"AGILITY"],[50,"DOUBLE_EDGE"]]},"166":{"n":"LEDIAN","t":["bug","flying"],"s":[55,35,50,85,55,110],"e":[],"m":["TACKLE","SUPERSONIC","COMET_PUNCH"],"l":[[24,"LIGHT_SCREEN"],[26,"REFLECT"],[28,"SAFEGUARD"],[34,"BATON_PASS"],[41,"SWIFT"],[48,"AGILITY"],[55,"DOUBLE_EDGE"]]},"167":{"n":"SPINARAK","t":["bug","poison"],"s":[40,60,40,30,40,40],"e":[168],"m":["POISON_STING","STRING_SHOT"],"l":[[6,"SCARY_FACE"],[11,"CONSTRICT"],[17,"NIGHT_SHADE"],[25,"LEECH_LIFE"],[33,"SPIDER_WEB"],[41,"AGILITY"],[49,"PSYCHIC_M"]]},"168":{"n":"ARIADOS","t":["bug","poison"],"s":[70,90,70,40,60,60],"e":[],"m":["POISON_STING","STRING_SHOT","SCARY_FACE","CONSTRICT"],"l":[[17,"NIGHT_SHADE"],[25,"LEECH_LIFE"],[34,"SPIDER_WEB"],[43,"AGILITY"],[52,"PSYCHIC_M"]]},"169":{"n":"CROBAT","t":["poison","flying"],"s":[85,90,80,130,70,80],"e":[],"m":["LEECH_LIFE","SCREECH","SUPERSONIC","BITE"],"l":[[21,"CONFUSE_RAY"],[28,"WING_ATTACK"],[36,"MEAN_LOOK"],[42,"HAZE"],[48,"DOUBLE_EDGE"]]},"170":{"n":"CHINCHOU","t":["water","electric"],"s":[75,38,38,67,56,56],"e":[171],"m":["BUBBLE","SUPERSONIC"],"l":[[13,"THUNDER_WAVE"],[17,"FLAIL"],[25,"WATER_GUN"],[29,"SPARK"],[37,"CONFUSE_RAY"],[41,"TAKE_DOWN"],[49,"HYDRO_PUMP"]]},"171":{"n":"LANTURN","t":["water","electric"],"s":[125,58,58,67,76,76],"e":[],"m":["BUBBLE","SUPERSONIC","THUNDER_WAVE","FLAIL"],"l":[[27,"WATER_GUN"],[33,"SPARK"],[43,"CONFUSE_RAY"],[49,"TAKE_DOWN"],[57,"HYDRO_PUMP"]]},"172":{"n":"PICHU","t":["electric"],"s":[20,40,15,60,35,35],"e":[25],"m":["THUNDERSHOCK","CHARM"],"l":[[6,"TAIL_WHIP"],[8,"THUNDER_WAVE"],[11,"SWEET_KISS"]]},"173":{"n":"CLEFFA","t":["normal"],"s":[50,25,28,15,45,55],"e":[35],"m":["POUND","CHARM"],"l":[[4,"ENCORE"],[8,"SING"],[13,"SWEET_KISS"],[17,"DEFENSE_CURL"],[20,"PRESENT"],[25,"METRONOME"],[29,"SAFEGUARD"]]},"174":{"n":"IGGLYBUFF","t":["normal"],"s":[90,30,15,15,40,20],"e":[39],"m":["SING","CHARM"],"l":[[4,"DEFENSE_CURL"],[9,"POUND"],[14,"SWEET_KISS"]]},"175":{"n":"TOGEPI","t":["normal"],"s":[35,20,65,20,40,65],"e":[176],"m":["GROWL","CHARM"],"l":[[6,"METRONOME"],[11,"SWEET_KISS"],[16,"ENCORE"],[21,"SAFEGUARD"],[26,"DOUBLE_EDGE"]]},"176":{"n":"TOGETIC","t":["normal","flying"],"s":[55,40,85,40,80,105],"e":[],"m":["GROWL","CHARM","METRONOME","SWEET_KISS"],"l":[[21,"ENCORE"],[26,"SAFEGUARD"],[31,"DOUBLE_EDGE"]]},"177":{"n":"NATU","t":["psychic","flying"],"s":[40,50,45,70,70,45],"e":[178],"m":["PECK","LEER"],"l":[[10,"NIGHT_SHADE"],[20,"TELEPORT"],[30,"FUTURE_SIGHT"],[40,"CONFUSE_RAY"],[50,"PSYCHIC_M"]]},"178":{"n":"XATU","t":["psychic","flying"],"s":[65,75,70,95,95,70],"e":[],"m":["PECK","LEER","NIGHT_SHADE","TELEPORT"],"l":[[30,"FUTURE_SIGHT"],[40,"CONFUSE_RAY"],[50,"PSYCHIC_M"]]},"179":{"n":"MAREEP","t":["electric"],"s":[55,40,40,35,65,45],"e":[180],"m":["TACKLE","GROWL"],"l":[[9,"THUNDERSHOCK"],[16,"THUNDER_WAVE"],[23,"COTTON_SPORE"],[30,"LIGHT_SCREEN"],[37,"THUNDER"]]},"180":{"n":"FLAAFFY","t":["electric"],"s":[70,55,55,45,80,60],"e":[181],"m":["TACKLE","GROWL","THUNDERSHOCK","THUNDER_WAVE"],"l":[[18,"COTTON_SPORE"],[27,"LIGHT_SCREEN"],[36,"THUNDER"]]},"181":{"n":"AMPHAROS","t":["electric"],"s":[90,75,75,55,115,90],"e":[],"m":["TACKLE","GROWL","THUNDERSHOCK","THUNDER_WAVE"],"l":[[18,"COTTON_SPORE"],[30,"LIGHT_SCREEN"],[36,"THUNDERPUNCH"],[42,"THUNDER"]]},"182":{"n":"BELLOSSOM","t":["grass"],"s":[75,80,85,50,90,100],"e":[],"m":["ABSORB","SWEET_SCENT","STUN_SPORE","SLEEP_POWDER"],"l":[[36,"ACID"],[44,"PETAL_DANCE"]]},"183":{"n":"MARILL","t":["water"],"s":[70,20,50,40,20,50],"e":[184],"m":["TACKLE","TAIL_WHIP"],"l":[[3,"DEFENSE_CURL"],[6,"WATER_GUN"],[10,"ROLLOUT"],[15,"BUBBLEBEAM"],[21,"DOUBLE_EDGE"],[28,"RAIN_DANCE"],[36,"HYDRO_PUMP"]]},"184":{"n":"AZUMARILL","t":["water"],"s":[100,50,80,50,60,80],"e":[],"m":["TACKLE","TAIL_WHIP","DEFENSE_CURL","WATER_GUN"],"l":[[10,"ROLLOUT"],[15,"BUBBLEBEAM"],[24,"DOUBLE_EDGE"],[34,"RAIN_DANCE"],[45,"HYDRO_PUMP"]]},"185":{"n":"SUDOWOODO","t":["rock"],"s":[70,100,115,30,30,65],"e":[],"m":["ROCK_THROW","MIMIC"],"l":[[9,"FLAIL"],[17,"LOW_KICK"],[25,"ROCK_SLIDE"],[33,"FAINT_ATTACK"],[41,"SLAM"],[49,"DOUBLE_EDGE"]]},"186":{"n":"POLITOED","t":["water"],"s":[90,75,75,70,90,100],"e":[],"m":["WATER_GUN","HYPNOSIS","DOUBLESLAP","PERISH_SONG"],"l":[[35,"SWAGGER"],[43,"BUBBLEBEAM"],[51,"HYDRO_PUMP"]]},"187":{"n":"HOPPIP","t":["grass","flying"],"s":[35,35,40,50,35,55],"e":[188],"m":["SPLASH"],"l":[[5,"SYNTHESIS"],[10,"TAIL_WHIP"],[13,"TACKLE"],[15,"POISONPOWDER"],[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[30,"LEECH_SEED"],[35,"COTTON_SPORE"]]},"188":{"n":"SKIPLOOM","t":["grass","flying"],"s":[55,45,50,80,45,65],"e":[189],"m":["SPLASH","SYNTHESIS","TAIL_WHIP","TACKLE"],"l":[[15,"POISONPOWDER"],[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[33,"LEECH_SEED"],[43,"COTTON_SPORE"]]},"189":{"n":"JUMPLUFF","t":["grass","flying"],"s":[75,55,70,110,55,85],"e":[],"m":["SYNTHESIS","TAIL_WHIP","TACKLE","POISONPOWDER"],"l":[[20,"STUN_SPORE"],[25,"SLEEP_POWDER"],[33,"LEECH_SEED"],[45,"COTTON_SPORE"]]},"190":{"n":"AIPOM","t":["normal"],"s":[55,70,55,85,40,55],"e":[],"m":["SCRATCH","TAIL_WHIP"],"l":[[6,"SAND_ATTACK"],[13,"BATON_PASS"],[18,"FURY_SWIPES"],[26,"SWIFT"],[33,"SCREECH"],[43,"AGILITY"]]},"191":{"n":"SUNKERN","t":["grass"],"s":[30,30,30,30,30,30],"e":[192],"m":["ABSORB"],"l":[[6,"GROWTH"],[13,"MEGA_DRAIN"],[18,"SUNNY_DAY"],[25,"SYNTHESIS"],[30,"GIGA_DRAIN"]]},"192":{"n":"SUNFLORA","t":["grass"],"s":[75,75,55,30,105,85],"e":[],"m":["ABSORB","GROWTH","RAZOR_LEAF","SUNNY_DAY"],"l":[[25,"SYNTHESIS"],[30,"GIGA_DRAIN"],[42,"SOLARBEAM"]]},"193":{"n":"YANMA","t":["bug","flying"],"s":[65,65,45,95,75,45],"e":[],"m":["TACKLE","FORESIGHT"],"l":[[7,"QUICK_ATTACK"],[13,"DOUBLE_TEAM"],[19,"SONICBOOM"],[25,"DETECT"],[31,"SUPERSONIC"],[49,"SCREECH"]]},"194":{"n":"WOOPER","t":["water","ground"],"s":[55,45,45,15,25,25],"e":[195],"m":["WATER_GUN","TAIL_WHIP"],"l":[[11,"SLAM"],[16,"MUD_SLAP"],[21,"AMNESIA"],[31,"EARTHQUAKE"],[36,"RAIN_DANCE"],[41,"MIST"],[51,"HAZE"]]},"195":{"n":"QUAGSIRE","t":["water","ground"],"s":[95,85,85,35,65,65],"e":[],"m":["WATER_GUN","TAIL_WHIP","SLAM","MUD_SLAP"],"l":[[23,"AMNESIA"],[35,"EARTHQUAKE"],[42,"RAIN_DANCE"],[49,"MIST"],[57,"HAZE"]]},"196":{"n":"ESPEON","t":["psychic"],"s":[65,65,60,110,130,95],"e":[],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"SAND_ATTACK"],[16,"QUICK_ATTACK"],[23,"SWIFT"],[30,"PSYBEAM"],[36,"PSYCH_UP"],[42,"PSYCHIC_M"],[47,"MORNING_SUN"]]},"197":{"n":"UMBREON","t":["dark"],"s":[95,65,110,65,60,130],"e":[],"m":["TACKLE","TAIL_WHIP"],"l":[[8,"SAND_ATTACK"],[16,"QUICK_ATTACK"],[23,"PURSUIT"],[30,"FAINT_ATTACK"],[36,"SCREECH"],[42,"MEAN_LOOK"],[47,"MOONLIGHT"]]},"198":{"n":"MURKROW","t":["dark","flying"],"s":[60,85,42,91,85,42],"e":[],"m":["PECK","PURSUIT"],"l":[[16,"HAZE"],[21,"NIGHT_SHADE"],[26,"FAINT_ATTACK"],[31,"WHIRLWIND"],[36,"MEAN_LOOK"],[41,"DRILL_PECK"]]},"199":{"n":"SLOWKING","t":["water","psychic"],"s":[95,75,80,30,100,110],"e":[],"m":["CURSE","TACKLE","GROWL","WATER_GUN"],"l":[[18,"CONFUSION"],[22,"DISABLE"],[27,"HEADBUTT"],[33,"SWAGGER"],[40,"PSYCHIC_M"],[48,"PSYCH_UP"]]},"200":{"n":"MISDREAVUS","t":["ghost"],"s":[60,60,60,85,85,85],"e":[],"m":["GROWL","PSYWAVE"],"l":[[6,"SPITE"],[11,"MEAN_LOOK"],[17,"PSYBEAM"],[23,"PAIN_SPLIT"],[30,"SHADOW_BALL"],[37,"PERISH_SONG"],[45,"DESTINY_BOND"]]},"201":{"n":"UNOWN","t":["psychic"],"s":[48,72,48,48,72,48],"e":[],"m":["HIDDEN_POWER"],"l":[]},"202":{"n":"WOBBUFFET","t":["psychic"],"s":[190,33,58,33,33,58],"e":[],"m":["COUNTER","MIRROR_COAT","SAFEGUARD","DESTINY_BOND"],"l":[]},"203":{"n":"GIRAFARIG","t":["normal","psychic"],"s":[70,80,65,85,90,65],"e":[],"m":["TACKLE","GROWL"],"l":[[7,"CONFUSION"],[13,"STOMP"],[19,"PSYBEAM"],[25,"AGILITY"],[31,"BATON_PASS"],[37,"TAKE_DOWN"],[43,"PSYCHIC_M"]]},"204":{"n":"PINECO","t":["bug"],"s":[50,65,90,15,35,35],"e":[205],"m":["TACKLE","PROTECT"],"l":[[8,"SELFDESTRUCT"],[15,"TAKE_DOWN"],[22,"RAPID_SPIN"],[29,"BIDE"],[36,"EXPLOSION"],[43,"SPIKES"],[50,"DOUBLE_EDGE"]]},"205":{"n":"FORRETRESS","t":["bug","steel"],"s":[75,90,140,40,60,60],"e":[],"m":["TACKLE","PROTECT","SELFDESTRUCT","TAKE_DOWN"],"l":[[23,"RAPID_SPIN"],[31,"BIDE"],[39,"EXPLOSION"],[47,"SPIKES"],[55,"DOUBLE_EDGE"]]},"206":{"n":"DUNSPARCE","t":["normal"],"s":[100,70,70,45,65,65],"e":[],"m":["RAGE"],"l":[[4,"DEFENSE_CURL"],[10,"GLARE"],[19,"ROLLOUT"],[25,"SPITE"],[31,"SCREECH"],[37,"TAKE_DOWN"],[43,"ENDURE"],[49,"DOUBLE_EDGE"]]},"207":{"n":"GLIGAR","t":["ground","flying"],"s":[65,75,105,85,35,65],"e":[],"m":["POISON_STING"],"l":[[6,"SAND_ATTACK"],[13,"HARDEN"],[20,"QUICK_ATTACK"],[28,"FAINT_ATTACK"],[36,"SLASH"],[44,"SCREECH"],[52,"GUILLOTINE"]]},"208":{"n":"STEELIX","t":["steel","ground"],"s":[75,85,200,30,55,65],"e":[],"m":["TACKLE","SCREECH","BIND","ROCK_THROW"],"l":[[19,"HARDEN"],[25,"RAGE"],[31,"SANDSTORM"],[37,"SLAM"],[43,"IRON_TAIL"],[49,"SCREECH"],[55,"DOUBLE_EDGE"]]},"209":{"n":"SNUBBULL","t":["normal"],"s":[60,80,50,30,40,40],"e":[210],"m":["TACKLE","SCARY_FACE"],"l":[[8,"TAIL_WHIP"],[13,"CHARM"],[19,"BITE"],[26,"LICK"],[34,"ROAR"],[43,"RAGE"],[53,"CRUNCH"]]},"210":{"n":"GRANBULL","t":["normal"],"s":[90,120,75,45,60,60],"e":[],"m":["TACKLE","SCARY_FACE","TAIL_WHIP","CHARM"],"l":[[19,"BITE"],[28,"LICK"],[38,"ROAR"],[49,"RAGE"],[61,"TAKE_DOWN"]]},"211":{"n":"QWILFISH","t":["water","poison"],"s":[65,95,75,85,55,55],"e":[],"m":["TACKLE","POISON_STING"],"l":[[9,"HARDEN"],[13,"MINIMIZE"],[20,"WATER_GUN"],[28,"PIN_MISSILE"],[36,"TAKE_DOWN"],[44,"HYDRO_PUMP"]]},"212":{"n":"SCIZOR","t":["bug","steel"],"s":[70,130,100,65,55,80],"e":[],"m":["QUICK_ATTACK","LEER","FOCUS_ENERGY","PURSUIT"],"l":[[21,"FALSE_SWIPE"],[26,"AGILITY"],[31,"METAL_CLAW"],[36,"SLASH"],[41,"SWORDS_DANCE"],[46,"DOUBLE_TEAM"]]},"213":{"n":"SHUCKLE","t":["bug","rock"],"s":[20,10,230,5,10,230],"e":[],"m":["CONSTRICT","WITHDRAW"],"l":[[9,"WRAP"],[14,"ENCORE"],[23,"SAFEGUARD"],[28,"BIDE"],[37,"REST"]]},"214":{"n":"HERACROSS","t":["bug","fighting"],"s":[80,125,75,85,40,95],"e":[],"m":["TACKLE","LEER"],"l":[[6,"HORN_ATTACK"],[11,"ENDURE"],[17,"FURY_ATTACK"],[23,"COUNTER"],[30,"TAKE_DOWN"],[37,"REVERSAL"],[45,"MEGAHORN"]]},"215":{"n":"SNEASEL","t":["dark","ice"],"s":[55,95,55,115,35,75],"e":[],"m":["SCRATCH","LEER"],"l":[[8,"QUICK_ATTACK"],[15,"SCREECH"],[22,"FAINT_ATTACK"],[29,"FURY_SWIPES"],[36,"AGILITY"],[43,"ICY_WIND"],[50,"SLASH"]]},"216":{"n":"TEDDIURSA","t":["normal"],"s":[60,80,50,40,50,50],"e":[217],"m":["SCRATCH","LEER"],"l":[[8,"LICK"],[15,"FURY_SWIPES"],[22,"FAINT_ATTACK"],[29,"REST"],[36,"SLASH"],[43,"SNORE"],[50,"THRASH"]]},"217":{"n":"URSARING","t":["normal"],"s":[90,130,75,55,75,75],"e":[],"m":["SCRATCH","LEER","LICK","FURY_SWIPES"],"l":[[25,"FAINT_ATTACK"],[32,"REST"],[41,"SLASH"],[50,"SNORE"],[59,"THRASH"]]},"218":{"n":"SLUGMA","t":["fire"],"s":[40,40,40,20,70,40],"e":[219],"m":["SMOG"],"l":[[8,"EMBER"],[15,"ROCK_THROW"],[22,"HARDEN"],[29,"AMNESIA"],[36,"FLAMETHROWER"],[43,"ROCK_SLIDE"],[50,"BODY_SLAM"]]},"219":{"n":"MAGCARGO","t":["fire","rock"],"s":[50,50,120,30,80,80],"e":[],"m":["SMOG","EMBER","ROCK_THROW","HARDEN"],"l":[[29,"AMNESIA"],[36,"FLAMETHROWER"],[48,"ROCK_SLIDE"],[60,"BODY_SLAM"]]},"220":{"n":"SWINUB","t":["ice","ground"],"s":[50,50,40,50,30,30],"e":[221],"m":["TACKLE"],"l":[[10,"POWDER_SNOW"],[16,"ENDURE"],[19,"TAKE_DOWN"],[28,"MIST"],[37,"BLIZZARD"],[46,"AMNESIA"]]},"221":{"n":"PILOSWINE","t":["ice","ground"],"s":[100,100,80,50,60,60],"e":[],"m":["TACKLE","POWDER_SNOW","ENDURE","TAKE_DOWN"],"l":[[28,"FURY_ATTACK"],[33,"MIST"],[42,"BLIZZARD"],[56,"AMNESIA"]]},"222":{"n":"CORSOLA","t":["water","rock"],"s":[55,55,85,35,65,85],"e":[],"m":["TACKLE"],"l":[[6,"HARDEN"],[12,"BUBBLE"],[17,"RECOVER"],[23,"BUBBLEBEAM"],[28,"SPIKE_CANNON"],[34,"ROCK_SLIDE"],[39,"MIRROR_COAT"],[45,"ANCIENTPOWER"]]},"223":{"n":"REMORAID","t":["water"],"s":[35,65,35,65,65,35],"e":[224],"m":["WATER_GUN"],"l":[[11,"LOCK_ON"],[22,"PSYBEAM"],[27,"AURORA_BEAM"],[33,"BUBBLEBEAM"],[38,"FOCUS_ENERGY"],[44,"HYPER_BEAM"]]},"224":{"n":"OCTILLERY","t":["water"],"s":[75,105,75,45,105,75],"e":[],"m":["WATER_GUN","CONSTRICT","PSYBEAM","AURORA_BEAM"],"l":[[25,"OCTAZOOKA"],[33,"BUBBLEBEAM"],[41,"FOCUS_ENERGY"],[50,"HYPER_BEAM"]]},"225":{"n":"DELIBIRD","t":["ice","flying"],"s":[45,55,45,75,65,45],"e":[],"m":["PRESENT"],"l":[]},"226":{"n":"MANTINE","t":["water","flying"],"s":[65,40,70,70,80,140],"e":[],"m":["TACKLE","BUBBLE"],"l":[[8,"SUPERSONIC"],[15,"BUBBLEBEAM"],[22,"TAKE_DOWN"],[29,"AGILITY"],[36,"WING_ATTACK"],[43,"WATER_GUN"],[50,"HYDRO_PUMP"]]},"227":{"n":"SKARMORY","t":["steel","flying"],"s":[65,80,140,70,40,70],"e":[],"m":["LEER","PECK"],"l":[[13,"SAND_ATTACK"],[19,"SWIFT"],[25,"AGILITY"],[37,"FURY_ATTACK"],[49,"STEEL_WING"]]},"228":{"n":"HOUNDOUR","t":["dark","fire"],"s":[45,60,30,65,80,50],"e":[229],"m":["LEER","EMBER"],"l":[[7,"ROAR"],[13,"SMOG"],[19,"BITE"],[25,"FAINT_ATTACK"],[31,"FLAMETHROWER"],[37,"CRUNCH"]]},"229":{"n":"HOUNDOOM","t":["dark","fire"],"s":[75,90,50,95,110,80],"e":[],"m":["LEER","EMBER","ROAR","SMOG"],"l":[[19,"BITE"],[35,"FAINT_ATTACK"],[43,"FLAMETHROWER"],[51,"CRUNCH"]]},"230":{"n":"KINGDRA","t":["water","dragon"],"s":[75,95,95,85,95,95],"e":[],"m":["BUBBLE","SMOKESCREEN","LEER","WATER_GUN"],"l":[[35,"DRAGONBREATH"],[40,"AGILITY"],[48,"HYDRO_PUMP"]]},"231":{"n":"PHANPY","t":["ground"],"s":[90,60,60,40,40,40],"e":[232],"m":["TACKLE","GROWL"],"l":[[9,"DEFENSE_CURL"],[17,"FLAIL"],[25,"ROLLOUT"],[33,"ENDURE"],[41,"TAKE_DOWN"],[49,"DOUBLE_EDGE"]]},"232":{"n":"DONPHAN","t":["ground"],"s":[90,120,120,50,60,60],"e":[],"m":["HORN_ATTACK","GROWL","DEFENSE_CURL","FLAIL"],"l":[[25,"ROLLOUT"],[33,"FURY_ATTACK"],[41,"TAKE_DOWN"],[49,"EARTHQUAKE"]]},"233":{"n":"PORYGON2","t":["normal"],"s":[85,80,90,60,105,95],"e":[],"m":["CONVERSION2","TACKLE","CONVERSION","SHARPEN"],"l":[[23,"PSYBEAM"],[28,"RECOVER"],[35,"AGILITY"],[42,"TRI_ATTACK"]]},"234":{"n":"STANTLER","t":["normal"],"s":[73,95,62,85,85,65],"e":[],"m":["TACKLE","LEER"],"l":[[7,"HYPNOSIS"],[13,"STOMP"],[19,"SAND_ATTACK"],[25,"TAKE_DOWN"],[31,"CONFUSE_RAY"],[37,"PSYCH_UP"],[43,"DOUBLE_EDGE"]]},"235":{"n":"SMEARGLE","t":["normal"],"s":[55,20,35,75,20,45],"e":[],"m":["TACKLE","SPLASH","MIMIC","METRONOME"],"l":[]},"236":{"n":"TYROGUE","t":["fighting"],"s":[35,35,35,35,35,35],"e":[106,107,237],"m":["TACKLE"],"l":[]},"237":{"n":"HITMONTOP","t":["fighting"],"s":[50,95,95,70,35,110],"e":[],"m":["ROLLING_KICK","FOCUS_ENERGY","PURSUIT","QUICK_ATTACK"],"l":[[20,"RAPID_SPIN"],[25,"COUNTER"],[32,"AGILITY"],[40,"TRIPLE_KICK"],[48,"DETECT"]]},"238":{"n":"SMOOCHUM","t":["ice","psychic"],"s":[45,30,15,65,85,65],"e":[124],"m":["POUND","LICK"],"l":[[9,"SWEET_KISS"],[13,"POWDER_SNOW"],[21,"CONFUSION"],[25,"SING"],[33,"MEAN_LOOK"],[37,"FAINT_ATTACK"],[45,"PSYCHIC_M"],[49,"PERISH_SONG"]]},"239":{"n":"ELEKID","t":["electric"],"s":[45,63,37,95,65,55],"e":[125],"m":["QUICK_ATTACK","LEER"],"l":[[9,"THUNDERPUNCH"],[17,"LIGHT_SCREEN"],[25,"SWIFT"],[33,"SCREECH"],[41,"THUNDERBOLT"],[49,"THUNDER"]]},"240":{"n":"MAGBY","t":["fire"],"s":[45,75,37,83,70,55],"e":[126],"m":["EMBER"],"l":[[7,"LEER"],[13,"SMOG"],[19,"FIRE_PUNCH"],[25,"SMOKESCREEN"],[31,"SUNNY_DAY"],[37,"FLAMETHROWER"],[43,"CONFUSE_RAY"],[49,"FIRE_BLAST"]]},"241":{"n":"MILTANK","t":["normal"],"s":[95,80,105,100,40,70],"e":[],"m":["TACKLE","GROWL"],"l":[[8,"STOMP"],[13,"MILK_DRINK"],[19,"BIDE"],[26,"ROLLOUT"],[34,"BODY_SLAM"],[43,"HEAL_BELL"]]},"242":{"n":"BLISSEY","t":["normal"],"s":[255,10,10,55,75,135],"e":[],"m":["POUND","GROWL","TAIL_WHIP","SOFTBOILED"],"l":[[13,"DOUBLESLAP"],[23,"MINIMIZE"],[33,"SING"],[44,"EGG_BOMB"]]},"243":{"n":"RAIKOU","t":["electric"],"s":[90,85,75,115,115,100],"e":[],"m":["THUNDERSHOCK","ROAR","LEER","QUICK_ATTACK"],"l":[[21,"SPARK"],[31,"REFLECT"],[41,"CRUNCH"],[51,"THUNDER"]]},"244":{"n":"ENTEI","t":["fire"],"s":[115,115,85,100,90,75],"e":[],"m":["EMBER","ROAR","LEER","STOMP"],"l":[[21,"FIRE_SPIN"],[31,"SWAGGER"],[41,"FLAMETHROWER"],[51,"CRUNCH"]]},"245":{"n":"SUICUNE","t":["water"],"s":[100,75,115,85,90,115],"e":[],"m":["BUBBLEBEAM","RAIN_DANCE","GUST","AURORA_BEAM"],"l":[[21,"MIST"],[31,"MIRROR_COAT"],[41,"HYDRO_PUMP"]]},"246":{"n":"LARVITAR","t":["rock","ground"],"s":[50,64,50,41,45,50],"e":[247],"m":["BITE","LEER"],"l":[[8,"SANDSTORM"],[15,"SCREECH"],[22,"ROCK_SLIDE"],[29,"THRASH"],[36,"SCARY_FACE"],[43,"CRUNCH"],[50,"EARTHQUAKE"]]},"247":{"n":"PUPITAR","t":["rock","ground"],"s":[70,84,70,51,65,70],"e":[248],"m":["BITE","LEER","SANDSTORM","SCREECH"],"l":[[22,"ROCK_SLIDE"],[30,"THRASH"],[38,"SCARY_FACE"],[46,"CRUNCH"],[54,"EARTHQUAKE"]]},"248":{"n":"TYRANITAR","t":["rock","dark"],"s":[100,134,110,61,95,100],"e":[],"m":["BITE","LEER","SANDSTORM","SCREECH"],"l":[[22,"ROCK_SLIDE"],[30,"THRASH"],[38,"SCARY_FACE"],[46,"CRUNCH"],[54,"EARTHQUAKE"],[61,"HYPER_BEAM"]]},"249":{"n":"LUGIA","t":["psychic","flying"],"s":[106,90,130,110,90,154],"e":[],"m":["AEROBLAST","SAFEGUARD","GUST","RECOVER"],"l":[[20,"RAIN_DANCE"],[30,"HYDRO_PUMP"],[40,"ANCIENTPOWER"],[50,"FUTURE_SIGHT"]]},"250":{"n":"HO-OH","t":["fire","flying"],"s":[106,130,90,90,110,154],"e":[],"m":["SACRED_FIRE","SAFEGUARD","GUST","RECOVER"],"l":[[20,"SUNNY_DAY"],[30,"FIRE_BLAST"],[40,"ANCIENTPOWER"],[50,"FUTURE_SIGHT"]]},"251":{"n":"CELEBI","t":["psychic","grass"],"s":[100,100,100,100,100,100],"e":[],"m":["LEECH_SEED","CONFUSION","RECOVER","HEAL_BELL"],"l":[[20,"SAFEGUARD"],[30,"ANCIENTPOWER"],[40,"FUTURE_SIGHT"],[50,"BATON_PASS"]]}},"moves":{"POUND":{"n":"POUND","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"KARATE_CHOP":{"n":"KARATE CHOP","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"fighting","a":100,"pp":25,"hc":1},"DOUBLESLAP":{"n":"DOUBLESLAP","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":10},"COMET_PUNCH":{"n":"COMET PUNCH","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":85,"pp":15},"MEGA_PUNCH":{"n":"MEGA PUNCH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":85,"pp":20},"PAY_DAY":{"n":"PAY DAY","e":"PAY_DAY_EFFECT","p":40,"t":"normal","a":100,"pp":20},"FIRE_PUNCH":{"n":"FIRE PUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"fire","a":100,"pp":15,"sec":[{"k":"brn","c":10}]},"ICE_PUNCH":{"n":"ICE PUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"ice","a":100,"pp":15,"sec":[{"k":"frz","c":10}]},"THUNDERPUNCH":{"n":"THUNDERPUNCH","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"electric","a":100,"pp":15,"sec":[{"k":"par","c":10}]},"SCRATCH":{"n":"SCRATCH","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":35},"VICEGRIP":{"n":"VICEGRIP","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"normal","a":100,"pp":30},"GUILLOTINE":{"n":"GUILLOTINE","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"RAZOR_WIND":{"n":"RAZOR WIND","e":"CHARGE_EFFECT","p":80,"t":"normal","a":75,"pp":10},"SWORDS_DANCE":{"n":"SWORDS DANCE","e":"ATTACK_UP2_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"CUT":{"n":"CUT","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"normal","a":95,"pp":30},"GUST":{"n":"GUST","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"flying","a":100,"pp":35},"WING_ATTACK":{"n":"WING ATTACK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"WHIRLWIND":{"n":"WHIRLWIND","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":85,"pp":20,"self":1},"FLY":{"n":"FLY","e":"FLY_EFFECT","p":70,"t":"flying","a":95,"pp":15},"BIND":{"n":"BIND","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":75,"pp":20},"SLAM":{"n":"SLAM","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":75,"pp":20},"VINE_WHIP":{"n":"VINE WHIP","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"grass","a":100,"pp":10},"STOMP":{"n":"STOMP","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"normal","a":100,"pp":20,"sec":[{"k":"flinch","c":30}]},"DOUBLE_KICK":{"n":"DOUBLE KICK","e":"ATTACK_TWICE_EFFECT","p":30,"t":"fighting","a":100,"pp":30},"MEGA_KICK":{"n":"MEGA KICK","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"normal","a":75,"pp":5},"JUMP_KICK":{"n":"JUMP KICK","e":"JUMP_KICK_EFFECT","p":70,"t":"fighting","a":95,"pp":25},"ROLLING_KICK":{"n":"ROLLING KICK","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"fighting","a":85,"pp":15,"sec":[{"k":"flinch","c":30}]},"SAND_ATTACK":{"n":"SAND-ATTACK","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"ground","a":100,"pp":15},"HEADBUTT":{"n":"HEADBUTT","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":15,"sec":[{"k":"flinch","c":30}]},"HORN_ATTACK":{"n":"HORN ATTACK","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"normal","a":100,"pp":25},"FURY_ATTACK":{"n":"FURY ATTACK","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"HORN_DRILL":{"n":"HORN DRILL","e":"OHKO_EFFECT","p":1,"t":"normal","a":30,"pp":5},"TACKLE":{"n":"TACKLE","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"normal","a":95,"pp":35},"BODY_SLAM":{"n":"BODY SLAM","e":"NO_ADDITIONAL_EFFECT","p":85,"t":"normal","a":100,"pp":15,"sec":[{"k":"par","c":30}]},"WRAP":{"n":"WRAP","e":"TRAPPING_EFFECT","p":15,"t":"normal","a":85,"pp":20},"TAKE_DOWN":{"n":"TAKE DOWN","e":"RECOIL_EFFECT","p":90,"t":"normal","a":85,"pp":20},"THRASH":{"n":"THRASH","e":"THRASH_PETAL_DANCE_EFFECT","p":90,"t":"normal","a":100,"pp":20},"DOUBLE_EDGE":{"n":"DOUBLE-EDGE","e":"RECOIL_EFFECT","p":100,"t":"normal","a":100,"pp":15},"TAIL_WHIP":{"n":"TAIL WHIP","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"POISON_STING":{"n":"POISON STING","e":"NO_ADDITIONAL_EFFECT","p":15,"t":"poison","a":100,"pp":35,"sec":[{"k":"psn","c":30}]},"TWINEEDLE":{"n":"TWINEEDLE","e":"ATTACK_TWICE_EFFECT","p":25,"t":"bug","a":100,"pp":20,"sec":[{"k":"psn","c":20}]},"PIN_MISSILE":{"n":"PIN MISSILE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":14,"t":"bug","a":85,"pp":20},"LEER":{"n":"LEER","e":"DEFENSE_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":30},"BITE":{"n":"BITE","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dark","a":100,"pp":25,"sec":[{"k":"flinch","c":30}]},"GROWL":{"n":"GROWL","e":"ATTACK_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":40},"ROAR":{"n":"ROAR","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"SING":{"n":"SING","e":"SLEEP_EFFECT","p":0,"t":"normal","a":55,"pp":15},"SUPERSONIC":{"n":"SUPERSONIC","e":"CONFUSION_EFFECT","p":0,"t":"normal","a":55,"pp":20},"SONICBOOM":{"n":"SONICBOOM","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"normal","a":90,"pp":20},"DISABLE":{"n":"DISABLE","e":"DISABLE_EFFECT","p":0,"t":"normal","a":55,"pp":20},"ACID":{"n":"ACID","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"poison","a":100,"pp":30,"sec":[{"k":"stat","st":"def","d":-1,"c":10}]},"EMBER":{"n":"EMBER","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"fire","a":100,"pp":25,"sec":[{"k":"brn","c":10}]},"FLAMETHROWER":{"n":"FLAMETHROWER","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"fire","a":100,"pp":15,"sec":[{"k":"brn","c":10}]},"MIST":{"n":"MIST","e":"MIST_EFFECT","p":0,"t":"ice","a":100,"pp":30,"self":1},"WATER_GUN":{"n":"WATER GUN","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"water","a":100,"pp":25},"HYDRO_PUMP":{"n":"HYDRO PUMP","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"water","a":80,"pp":5},"SURF":{"n":"SURF","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"water","a":100,"pp":15},"ICE_BEAM":{"n":"ICE BEAM","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"ice","a":100,"pp":10,"sec":[{"k":"frz","c":10}]},"BLIZZARD":{"n":"BLIZZARD","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"ice","a":90,"pp":5,"sec":[{"k":"frz","c":10}]},"PSYBEAM":{"n":"PSYBEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"psychic","a":100,"pp":20,"sec":[{"k":"cnf","c":10}]},"BUBBLEBEAM":{"n":"BUBBLEBEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"water","a":100,"pp":20,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"AURORA_BEAM":{"n":"AURORA BEAM","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"ice","a":100,"pp":20,"sec":[{"k":"stat","st":"atk","d":-1,"c":10}]},"HYPER_BEAM":{"n":"HYPER BEAM","e":"HYPER_BEAM_EFFECT","p":150,"t":"normal","a":90,"pp":5},"PECK":{"n":"PECK","e":"NO_ADDITIONAL_EFFECT","p":35,"t":"flying","a":100,"pp":35},"DRILL_PECK":{"n":"DRILL PECK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"flying","a":100,"pp":20},"SUBMISSION":{"n":"SUBMISSION","e":"RECOIL_EFFECT","p":80,"t":"fighting","a":80,"pp":25},"LOW_KICK":{"n":"LOW KICK","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"fighting","a":90,"pp":20,"sec":[{"k":"flinch","c":30}]},"COUNTER":{"n":"COUNTER","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"fighting","a":100,"pp":20,"pri":-1,"x":"counter"},"SEISMIC_TOSS":{"n":"SEISMIC TOSS","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"fighting","a":100,"pp":20},"STRENGTH":{"n":"STRENGTH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":15},"ABSORB":{"n":"ABSORB","e":"DRAIN_HP_EFFECT","p":20,"t":"grass","a":100,"pp":20},"MEGA_DRAIN":{"n":"MEGA DRAIN","e":"DRAIN_HP_EFFECT","p":40,"t":"grass","a":100,"pp":10},"LEECH_SEED":{"n":"LEECH SEED","e":"LEECH_SEED_EFFECT","p":0,"t":"grass","a":90,"pp":10},"GROWTH":{"n":"GROWTH","e":"SPA_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"RAZOR_LEAF":{"n":"RAZOR LEAF","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"grass","a":95,"pp":25,"hc":1},"SOLARBEAM":{"n":"SOLARBEAM","e":"CHARGE_EFFECT","p":120,"t":"grass","a":100,"pp":10},"POISONPOWDER":{"n":"POISONPOWDER","e":"POISON_EFFECT","p":0,"t":"poison","a":75,"pp":35},"STUN_SPORE":{"n":"STUN SPORE","e":"PARALYZE_EFFECT","p":0,"t":"grass","a":75,"pp":30},"SLEEP_POWDER":{"n":"SLEEP POWDER","e":"SLEEP_EFFECT","p":0,"t":"grass","a":75,"pp":15},"PETAL_DANCE":{"n":"PETAL DANCE","e":"THRASH_PETAL_DANCE_EFFECT","p":70,"t":"grass","a":100,"pp":20},"STRING_SHOT":{"n":"STRING SHOT","e":"SPEED_DOWN1_EFFECT","p":0,"t":"bug","a":95,"pp":40},"DRAGON_RAGE":{"n":"DRAGON RAGE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"dragon","a":100,"pp":10},"FIRE_SPIN":{"n":"FIRE SPIN","e":"TRAPPING_EFFECT","p":15,"t":"fire","a":70,"pp":15},"THUNDERSHOCK":{"n":"THUNDERSHOCK","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"electric","a":100,"pp":30,"sec":[{"k":"par","c":10}]},"THUNDERBOLT":{"n":"THUNDERBOLT","e":"NO_ADDITIONAL_EFFECT","p":95,"t":"electric","a":100,"pp":15,"sec":[{"k":"par","c":10}]},"THUNDER_WAVE":{"n":"THUNDER WAVE","e":"PARALYZE_EFFECT","p":0,"t":"electric","a":100,"pp":20},"THUNDER":{"n":"THUNDER","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"electric","a":70,"pp":10,"sec":[{"k":"par","c":10}]},"ROCK_THROW":{"n":"ROCK THROW","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"rock","a":65,"pp":15},"EARTHQUAKE":{"n":"EARTHQUAKE","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"ground","a":100,"pp":10},"FISSURE":{"n":"FISSURE","e":"OHKO_EFFECT","p":1,"t":"ground","a":30,"pp":5},"DIG":{"n":"DIG","e":"CHARGE_EFFECT","p":100,"t":"ground","a":100,"pp":10},"TOXIC":{"n":"TOXIC","e":"POISON_EFFECT","p":0,"t":"poison","a":85,"pp":10},"CONFUSION":{"n":"CONFUSION","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"psychic","a":100,"pp":25,"sec":[{"k":"cnf","c":10}]},"PSYCHIC_M":{"n":"PSYCHIC","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"psychic","a":100,"pp":10,"sec":[{"k":"stat","st":"sdf","d":-1,"c":10}]},"HYPNOSIS":{"n":"HYPNOSIS","e":"SLEEP_EFFECT","p":0,"t":"psychic","a":60,"pp":20},"MEDITATE":{"n":"MEDITATE","e":"ATTACK_UP1_EFFECT","p":0,"t":"psychic","a":100,"pp":40,"self":1},"AGILITY":{"n":"AGILITY","e":"SPEED_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"QUICK_ATTACK":{"n":"QUICK ATTACK","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":30,"pri":1},"RAGE":{"n":"RAGE","e":"RAGE_EFFECT","p":20,"t":"normal","a":100,"pp":20},"TELEPORT":{"n":"TELEPORT","e":"SWITCH_AND_TELEPORT_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"NIGHT_SHADE":{"n":"NIGHT SHADE","e":"SPECIAL_DAMAGE_EFFECT","p":0,"t":"ghost","a":100,"pp":15},"MIMIC":{"n":"MIMIC","e":"MIMIC_EFFECT","p":0,"t":"normal","a":100,"pp":10},"SCREECH":{"n":"SCREECH","e":"DEFENSE_DOWN2_EFFECT","p":0,"t":"normal","a":85,"pp":40},"DOUBLE_TEAM":{"n":"DOUBLE TEAM","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":15,"self":1},"RECOVER":{"n":"RECOVER","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"HARDEN":{"n":"HARDEN","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"MINIMIZE":{"n":"MINIMIZE","e":"EVASION_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":20,"self":1},"SMOKESCREEN":{"n":"SMOKESCREEN","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"CONFUSE_RAY":{"n":"CONFUSE RAY","e":"CONFUSION_EFFECT","p":0,"t":"ghost","a":100,"pp":10},"WITHDRAW":{"n":"WITHDRAW","e":"DEFENSE_UP1_EFFECT","p":0,"t":"water","a":100,"pp":40,"self":1},"DEFENSE_CURL":{"n":"DEFENSE CURL","e":"DEFENSE_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"BARRIER":{"n":"BARRIER","e":"DEFENSE_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"LIGHT_SCREEN":{"n":"LIGHT SCREEN","e":"LIGHT_SCREEN_EFFECT","p":0,"t":"psychic","a":100,"pp":30,"self":1},"HAZE":{"n":"HAZE","e":"HAZE_EFFECT","p":0,"t":"ice","a":100,"pp":30,"self":1},"REFLECT":{"n":"REFLECT","e":"REFLECT_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"FOCUS_ENERGY":{"n":"FOCUS ENERGY","e":"FOCUS_ENERGY_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"BIDE":{"n":"BIDE","e":"BIDE_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"METRONOME":{"n":"METRONOME","e":"METRONOME_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"MIRROR_MOVE":{"n":"MIRROR MOVE","e":"MIRROR_MOVE_EFFECT","p":0,"t":"flying","a":100,"pp":20,"self":1},"SELFDESTRUCT":{"n":"SELFDESTRUCT","e":"EXPLODE_EFFECT","p":200,"t":"normal","a":100,"pp":5},"EGG_BOMB":{"n":"EGG BOMB","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"normal","a":75,"pp":10},"LICK":{"n":"LICK","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"ghost","a":100,"pp":30,"sec":[{"k":"par","c":30}]},"SMOG":{"n":"SMOG","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"poison","a":70,"pp":20,"sec":[{"k":"psn","c":40}]},"SLUDGE":{"n":"SLUDGE","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"poison","a":100,"pp":20,"sec":[{"k":"psn","c":30}]},"BONE_CLUB":{"n":"BONE CLUB","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"ground","a":85,"pp":20,"sec":[{"k":"flinch","c":10}]},"FIRE_BLAST":{"n":"FIRE BLAST","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"fire","a":85,"pp":5,"sec":[{"k":"brn","c":10}]},"WATERFALL":{"n":"WATERFALL","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"water","a":100,"pp":15,"sec":[{"k":"flinch","c":20}]},"CLAMP":{"n":"CLAMP","e":"TRAPPING_EFFECT","p":35,"t":"water","a":75,"pp":10},"SWIFT":{"n":"SWIFT","e":"SWIFT_EFFECT","p":60,"t":"normal","a":100,"pp":20,"nm":1},"SKULL_BASH":{"n":"SKULL BASH","e":"CHARGE_EFFECT","p":100,"t":"normal","a":100,"pp":15},"SPIKE_CANNON":{"n":"SPIKE CANNON","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":20,"t":"normal","a":100,"pp":15},"CONSTRICT":{"n":"CONSTRICT","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"normal","a":100,"pp":35,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"AMNESIA":{"n":"AMNESIA","e":"SDF_UP2_EFFECT","p":0,"t":"psychic","a":100,"pp":20,"self":1},"KINESIS":{"n":"KINESIS","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"psychic","a":80,"pp":15},"SOFTBOILED":{"n":"SOFTBOILED","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"HI_JUMP_KICK":{"n":"HI JUMP KICK","e":"JUMP_KICK_EFFECT","p":85,"t":"fighting","a":90,"pp":20},"GLARE":{"n":"GLARE","e":"PARALYZE_EFFECT","p":0,"t":"normal","a":75,"pp":30},"DREAM_EATER":{"n":"DREAM EATER","e":"DREAM_EATER_EFFECT","p":100,"t":"psychic","a":100,"pp":15},"POISON_GAS":{"n":"POISON GAS","e":"POISON_EFFECT","p":0,"t":"poison","a":55,"pp":40},"BARRAGE":{"n":"BARRAGE","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":15,"t":"normal","a":85,"pp":20},"LEECH_LIFE":{"n":"LEECH LIFE","e":"DRAIN_HP_EFFECT","p":20,"t":"bug","a":100,"pp":15},"LOVELY_KISS":{"n":"LOVELY KISS","e":"SLEEP_EFFECT","p":0,"t":"normal","a":75,"pp":10},"SKY_ATTACK":{"n":"SKY ATTACK","e":"CHARGE_EFFECT","p":140,"t":"flying","a":90,"pp":5,"sec":[{"k":"flinch","c":30}]},"TRANSFORM":{"n":"TRANSFORM","e":"TRANSFORM_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":0},"BUBBLE":{"n":"BUBBLE","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"water","a":100,"pp":30,"sec":[{"k":"stat","st":"spd","d":-1,"c":10}]},"DIZZY_PUNCH":{"n":"DIZZY PUNCH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":10},"SPORE":{"n":"SPORE","e":"SLEEP_EFFECT","p":0,"t":"grass","a":100,"pp":15},"FLASH":{"n":"FLASH","e":"ACCURACY_DOWN1_EFFECT","p":0,"t":"normal","a":70,"pp":20},"PSYWAVE":{"n":"PSYWAVE","e":"SPECIAL_DAMAGE_EFFECT","p":1,"t":"psychic","a":80,"pp":15},"SPLASH":{"n":"SPLASH","e":"SPLASH_EFFECT","p":0,"t":"normal","a":100,"pp":40,"self":1},"ACID_ARMOR":{"n":"ACID ARMOR","e":"DEFENSE_UP2_EFFECT","p":0,"t":"poison","a":100,"pp":40,"self":1},"CRABHAMMER":{"n":"CRABHAMMER","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"water","a":85,"pp":10,"hc":1},"EXPLOSION":{"n":"EXPLOSION","e":"EXPLODE_EFFECT","p":250,"t":"normal","a":100,"pp":5},"FURY_SWIPES":{"n":"FURY SWIPES","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":18,"t":"normal","a":80,"pp":15},"BONEMERANG":{"n":"BONEMERANG","e":"ATTACK_TWICE_EFFECT","p":50,"t":"ground","a":90,"pp":10},"REST":{"n":"REST","e":"HEAL_EFFECT","p":0,"t":"psychic","a":100,"pp":10,"self":1},"ROCK_SLIDE":{"n":"ROCK SLIDE","e":"NO_ADDITIONAL_EFFECT","p":75,"t":"rock","a":90,"pp":10,"sec":[{"k":"flinch","c":30}]},"HYPER_FANG":{"n":"HYPER FANG","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":90,"pp":15,"sec":[{"k":"flinch","c":10}]},"SHARPEN":{"n":"SHARPEN","e":"ATTACK_UP1_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"CONVERSION":{"n":"CONVERSION","e":"CONVERSION_EFFECT","p":0,"t":"normal","a":100,"pp":30,"self":1},"TRI_ATTACK":{"n":"TRI ATTACK","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":10},"SUPER_FANG":{"n":"SUPER FANG","e":"SUPER_FANG_EFFECT","p":1,"t":"normal","a":90,"pp":10},"SLASH":{"n":"SLASH","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"normal","a":100,"pp":20,"hc":1},"SUBSTITUTE":{"n":"SUBSTITUTE","e":"SUBSTITUTE_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"STRUGGLE":{"n":"STRUGGLE","e":"RECOIL_EFFECT","p":50,"t":"normal","a":100,"pp":10},"TRIPLE_KICK":{"n":"TRIPLE KICK","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"fighting","a":90,"pp":10,"x":"triple_kick"},"THIEF":{"n":"THIEF","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dark","a":100,"pp":10},"SPIDER_WEB":{"n":"SPIDER WEB","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"bug","a":100,"pp":10,"x":"mean_look"},"MIND_READER":{"n":"MIND READER","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"lock_on"},"NIGHTMARE":{"n":"NIGHTMARE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":15,"x":"nightmare"},"FLAME_WHEEL":{"n":"FLAME WHEEL","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"fire","a":100,"pp":25,"sec":[{"k":"brn","c":10}],"thaw":1},"SNORE":{"n":"SNORE","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":15,"x":"snore","sec":[{"k":"flinch","c":30}]},"CURSE":{"n":"CURSE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"curse","self":1},"FLAIL":{"n":"FLAIL","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":15,"x":"flail"},"CONVERSION2":{"n":"CONVERSION2","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":30,"x":"conversion2","self":1},"AEROBLAST":{"n":"AEROBLAST","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"flying","a":95,"pp":5,"hc":1},"COTTON_SPORE":{"n":"COTTON SPORE","e":"SPEED_DOWN2_EFFECT","p":0,"t":"grass","a":85,"pp":40},"REVERSAL":{"n":"REVERSAL","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"fighting","a":100,"pp":15,"x":"flail"},"SPITE":{"n":"SPITE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":10,"x":"spite"},"POWDER_SNOW":{"n":"POWDER SNOW","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"ice","a":100,"pp":25,"sec":[{"k":"frz","c":10}]},"PROTECT":{"n":"PROTECT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"protect","pri":3,"self":1},"MACH_PUNCH":{"n":"MACH PUNCH","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"fighting","a":100,"pp":30,"pri":1},"SCARY_FACE":{"n":"SCARY FACE","e":"SPEED_DOWN2_EFFECT","p":0,"t":"normal","a":90,"pp":10},"FAINT_ATTACK":{"n":"FAINT ATTACK","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dark","a":100,"pp":20,"nm":1},"SWEET_KISS":{"n":"SWEET KISS","e":"CONFUSION_EFFECT","p":0,"t":"normal","a":75,"pp":10},"BELLY_DRUM":{"n":"BELLY DRUM","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"belly_drum","self":1},"SLUDGE_BOMB":{"n":"SLUDGE BOMB","e":"NO_ADDITIONAL_EFFECT","p":90,"t":"poison","a":100,"pp":10,"sec":[{"k":"psn","c":30}]},"MUD_SLAP":{"n":"MUD-SLAP","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"ground","a":100,"pp":10,"sec":[{"k":"stat","st":"acc","d":-1,"c":100}]},"OCTAZOOKA":{"n":"OCTAZOOKA","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"water","a":85,"pp":10,"sec":[{"k":"stat","st":"acc","d":-1,"c":50}]},"SPIKES":{"n":"SPIKES","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ground","a":100,"pp":20,"x":"fail","self":1},"ZAP_CANNON":{"n":"ZAP CANNON","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"electric","a":50,"pp":5,"sec":[{"k":"par","c":100}]},"FORESIGHT":{"n":"FORESIGHT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":40,"x":"foresight"},"DESTINY_BOND":{"n":"DESTINY BOND","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"ghost","a":100,"pp":5,"x":"destiny","self":1},"PERISH_SONG":{"n":"PERISH SONG","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"perish","self":1},"ICY_WIND":{"n":"ICY WIND","e":"NO_ADDITIONAL_EFFECT","p":55,"t":"ice","a":95,"pp":15,"sec":[{"k":"stat","st":"spd","d":-1,"c":100}]},"DETECT":{"n":"DETECT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"fighting","a":100,"pp":5,"x":"protect","pri":3,"self":1},"BONE_RUSH":{"n":"BONE RUSH","e":"TWO_TO_FIVE_ATTACKS_EFFECT","p":25,"t":"ground","a":80,"pp":10},"LOCK_ON":{"n":"LOCK-ON","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"lock_on"},"OUTRAGE":{"n":"OUTRAGE","e":"THRASH_PETAL_DANCE_EFFECT","p":90,"t":"dragon","a":100,"pp":15},"SANDSTORM":{"n":"SANDSTORM","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"rock","a":100,"pp":10,"x":"sandstorm","self":1},"GIGA_DRAIN":{"n":"GIGA DRAIN","e":"DRAIN_HP_EFFECT","p":60,"t":"grass","a":100,"pp":5},"ENDURE":{"n":"ENDURE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"endure","pri":3,"self":1},"CHARM":{"n":"CHARM","e":"ATTACK_DOWN2_EFFECT","p":0,"t":"normal","a":100,"pp":20},"ROLLOUT":{"n":"ROLLOUT","e":"NO_ADDITIONAL_EFFECT","p":30,"t":"rock","a":90,"pp":20,"x":"rollout"},"FALSE_SWIPE":{"n":"FALSE SWIPE","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"normal","a":100,"pp":40,"x":"false_swipe"},"SWAGGER":{"n":"SWAGGER","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":90,"pp":15,"x":"swagger"},"MILK_DRINK":{"n":"MILK DRINK","e":"HEAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"self":1},"SPARK":{"n":"SPARK","e":"NO_ADDITIONAL_EFFECT","p":65,"t":"electric","a":100,"pp":20,"sec":[{"k":"par","c":30}]},"FURY_CUTTER":{"n":"FURY CUTTER","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"bug","a":95,"pp":20,"x":"fury_cutter"},"STEEL_WING":{"n":"STEEL WING","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"steel","a":90,"pp":25,"sec":[{"k":"stat","st":"def","d":1,"c":10,"self":1}]},"MEAN_LOOK":{"n":"MEAN LOOK","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"mean_look"},"ATTRACT":{"n":"ATTRACT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":15,"x":"fail","self":1},"SLEEP_TALK":{"n":"SLEEP TALK","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"sleep_talk","self":1},"HEAL_BELL":{"n":"HEAL BELL","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_bell","self":1},"RETURN":{"n":"RETURN","e":"NO_ADDITIONAL_EFFECT","p":102,"t":"normal","a":100,"pp":20},"PRESENT":{"n":"PRESENT","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":90,"pp":15,"x":"present"},"FRUSTRATION":{"n":"FRUSTRATION","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":20},"SAFEGUARD":{"n":"SAFEGUARD","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":25,"x":"safeguard","self":1},"PAIN_SPLIT":{"n":"PAIN SPLIT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":20,"x":"pain_split"},"SACRED_FIRE":{"n":"SACRED FIRE","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fire","a":95,"pp":5,"sec":[{"k":"brn","c":50}],"thaw":1},"MAGNITUDE":{"n":"MAGNITUDE","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"ground","a":100,"pp":30,"x":"magnitude"},"DYNAMICPUNCH":{"n":"DYNAMICPUNCH","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fighting","a":50,"pp":5,"sec":[{"k":"cnf","c":100}]},"MEGAHORN":{"n":"MEGAHORN","e":"NO_ADDITIONAL_EFFECT","p":120,"t":"bug","a":85,"pp":10},"DRAGONBREATH":{"n":"DRAGONBREATH","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"dragon","a":100,"pp":20,"sec":[{"k":"par","c":30}]},"BATON_PASS":{"n":"BATON PASS","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":40,"x":"fail","self":1},"ENCORE":{"n":"ENCORE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"encore"},"PURSUIT":{"n":"PURSUIT","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dark","a":100,"pp":20},"RAPID_SPIN":{"n":"RAPID SPIN","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"normal","a":100,"pp":40,"x":"rapid_spin"},"SWEET_SCENT":{"n":"SWEET SCENT","e":"EVASION_DOWN1_EFFECT","p":0,"t":"normal","a":100,"pp":20},"IRON_TAIL":{"n":"IRON TAIL","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"steel","a":75,"pp":15,"sec":[{"k":"stat","st":"def","d":-1,"c":30}]},"METAL_CLAW":{"n":"METAL CLAW","e":"NO_ADDITIONAL_EFFECT","p":50,"t":"steel","a":95,"pp":35,"sec":[{"k":"stat","st":"atk","d":1,"c":10,"self":1}]},"VITAL_THROW":{"n":"VITAL THROW","e":"NO_ADDITIONAL_EFFECT","p":70,"t":"fighting","a":100,"pp":10,"pri":-1,"nm":1},"MORNING_SUN":{"n":"MORNING SUN","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_weather","self":1},"SYNTHESIS":{"n":"SYNTHESIS","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"grass","a":100,"pp":5,"x":"heal_weather","self":1},"MOONLIGHT":{"n":"MOONLIGHT","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":5,"x":"heal_weather","self":1},"HIDDEN_POWER":{"n":"HIDDEN POWER","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"normal","a":100,"pp":15,"x":"hidden_power"},"CROSS_CHOP":{"n":"CROSS CHOP","e":"NO_ADDITIONAL_EFFECT","p":100,"t":"fighting","a":80,"pp":5,"hc":1},"TWISTER":{"n":"TWISTER","e":"NO_ADDITIONAL_EFFECT","p":40,"t":"dragon","a":100,"pp":20,"sec":[{"k":"flinch","c":20}]},"RAIN_DANCE":{"n":"RAIN DANCE","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"water","a":90,"pp":5,"x":"rain","self":1},"SUNNY_DAY":{"n":"SUNNY DAY","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"fire","a":90,"pp":5,"x":"sun","self":1},"CRUNCH":{"n":"CRUNCH","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"dark","a":100,"pp":15,"sec":[{"k":"stat","st":"sdf","d":-1,"c":20}]},"MIRROR_COAT":{"n":"MIRROR COAT","e":"NO_ADDITIONAL_EFFECT","p":1,"t":"psychic","a":100,"pp":20,"x":"mirror_coat","pri":-1},"PSYCH_UP":{"n":"PSYCH UP","e":"NO_ADDITIONAL_EFFECT","p":0,"t":"normal","a":100,"pp":10,"x":"psych_up","self":1},"EXTREMESPEED":{"n":"EXTREMESPEED","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"normal","a":100,"pp":5,"pri":2},"ANCIENTPOWER":{"n":"ANCIENTPOWER","e":"NO_ADDITIONAL_EFFECT","p":60,"t":"rock","a":100,"pp":5,"sec":[{"k":"allstats","c":10,"self":1}]},"SHADOW_BALL":{"n":"SHADOW BALL","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"ghost","a":100,"pp":15,"sec":[{"k":"stat","st":"sdf","d":-1,"c":20}]},"FUTURE_SIGHT":{"n":"FUTURE SIGHT","e":"NO_ADDITIONAL_EFFECT","p":80,"t":"psychic","a":90,"pp":15,"x":"future_sight"},"ROCK_SMASH":{"n":"ROCK SMASH","e":"NO_ADDITIONAL_EFFECT","p":20,"t":"fighting","a":100,"pp":15,"sec":[{"k":"stat","st":"def","d":-1,"c":50}]},"WHIRLPOOL":{"n":"WHIRLPOOL","e":"TRAPPING_EFFECT","p":15,"t":"water","a":70,"pp":15},"BEAT_UP":{"n":"BEAT UP","e":"NO_ADDITIONAL_EFFECT","p":10,"t":"dark","a":100,"pp":10}},"chart":[["normal","rock",5],["normal","steel",5],["normal","ghost",0],["fire","fire",5],["fire","water",5],["fire","grass",20],["fire","ice",20],["fire","bug",20],["fire","rock",5],["fire","dragon",5],["fire","steel",20],["water","fire",20],["water","water",5],["water","grass",5],["water","ground",20],["water","rock",20],["water","dragon",5],["electric","water",20],["electric","electric",5],["electric","grass",5],["electric","ground",0],["electric","flying",20],["electric","dragon",5],["grass","fire",5],["grass","water",20],["grass","grass",5],["grass","poison",5],["grass","ground",20],["grass","flying",5],["grass","bug",5],["grass","rock",20],["grass","dragon",5],["grass","steel",5],["ice","water",5],["ice","grass",20],["ice","ice",5],["ice","ground",20],["ice","flying",20],["ice","dragon",20],["ice","fire",5],["ice","steel",5],["fighting","normal",20],["fighting","ice",20],["fighting","poison",5],["fighting","flying",5],["fighting","psychic",5],["fighting","bug",5],["fighting","rock",20],["fighting","ghost",0],["fighting","dark",20],["fighting","steel",20],["poison","grass",20],["poison","poison",5],["poison","ground",5],["poison","rock",5],["poison","ghost",5],["poison","steel",0],["ground","fire",20],["ground","electric",20],["ground","grass",5],["ground","poison",20],["ground","flying",0],["ground","bug",5],["ground","rock",20],["ground","steel",20],["flying","electric",5],["flying","grass",20],["flying","fighting",20],["flying","bug",20],["flying","rock",5],["flying","steel",5],["psychic","fighting",20],["psychic","poison",20],["psychic","psychic",5],["psychic","dark",0],["psychic","steel",5],["bug","fire",5],["bug","grass",20],["bug","fighting",5],["bug","poison",5],["bug","flying",5],["bug","psychic",20],["bug","ghost",5],["bug","dark",20],["bug","steel",5],["rock","fire",20],["rock","ice",20],["rock","fighting",5],["rock","ground",5],["rock","flying",20],["rock","bug",20],["rock","steel",5],["ghost","normal",0],["ghost","psychic",20],["ghost","ghost",20],["ghost","dark",5],["ghost","steel",5],["dragon","dragon",20],["dragon","steel",5],["dark","fighting",5],["dark","psychic",20],["dark","ghost",20],["dark","dark",5],["dark","steel",5],["steel","fire",5],["steel","water",5],["steel","electric",5],["steel","ice",20],["steel","rock",20],["steel","steel",5]]};
@@ -1685,10 +1804,13 @@ function g2ResolveRound(B, rng = Math.random) {
   return log.join(' ');
 }
 
-
 // ===================================================================
 // 5. POKÉMON HELPERS
-// Create / upgrade / evolve Pokémon (no external API needed) and the Pokédex + shiny first-catch records.
+// WHAT IT CONTAINS: small helpers used by many commands.
+//   generatePokemon(): create a new Pokémon (level, shiny chance, moves) - no outside service needed
+//   upgradeUser(): bring old saved Pokémon up to the current format
+//   markShiny() / recordFirstCatch(): the shiny collection and "first caught" dates shown on the website
+//   checkEvolution(): 3 of the same Pokémon evolve into the next form (if it has one)
 // ===================================================================
 async function generatePokemon(idOrName, forceShiny = null) {
   return g2CreateMon(Number(idOrName), forceShiny);
@@ -1767,12 +1889,27 @@ async function checkEvolution(db, user) {
 
 // ===================================================================
 // 6. BATTLE FLOW
-// Last-battle record for the overlay, chat commentary, round conclusion, time limits and winner messages.
+// WHAT IT CONTAINS: everything around a running battle.
+//   recordBattleEnd(): saves the last result for the overlay and counts the win (a repeat win against the same trainer
+//   within 30 minutes is not counted, stops win trading); round commentary text; concludeRounds() resolves a round and
+//   announces the winner; applyBattleTimers() ends battles on the time limit and cancels unanswered challenges.
 // ===================================================================
 
 // Remember how the last battle ended so the OBS overlay can play the ending animation
 function recordBattleEnd(db, battle, winner, reason, message) {
-  if (winner && db.users[winner]) db.users[winner].battleWins = (db.users[winner].battleWins || 0) + 1;
+  const loser = winner === battle.p1 ? battle.p2 : battle.p1;
+  if (winner && db.users[winner]) {
+    // Win-trading guard: beating the same trainer again within WIN_REPEAT_COOLDOWN_MS is not counted (the bot trainer is exempt)
+    const w = db.users[winner];
+    const now = Date.now();
+    if (!w.lastWinOver) w.lastWinOver = {};
+    for (const k of Object.keys(w.lastWinOver)) if (now - w.lastWinOver[k] > WIN_REPEAT_COOLDOWN_MS) delete w.lastWinOver[k];
+    const track = loser !== AUTO_TRAINER && /^[a-z0-9_-]{1,40}$/.test(loser) && !isUnsafeName(loser); // plain names only (safe database keys)
+    if (!(track && w.lastWinOver[loser])) {
+      w.battleWins = (w.battleWins || 0) + 1;
+      if (track) w.lastWinOver[loser] = now;
+    }
+  }
   db.lastBattleResult = {
     at: Date.now(),
     p1: battle.p1,
@@ -1790,7 +1927,6 @@ function recordBattleEnd(db, battle, winner, reason, message) {
     message
   };
 }
-
 
 function pickLine(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -1908,7 +2044,10 @@ function applyBattleTimers(db, key, battle) {
 
 // ===================================================================
 // 7. SPAWNING
-// Wild Pokémon spawn (cron, !spawn, !shinyspawn) and the "next spawn in ..." text.
+// WHAT IT CONTAINS
+//   - triggerSpawn(): creates a wild Pokémon (used by the cron job, !spawn and !shinyspawn); nextSpawnText(): the "next spawn in ..." text
+//   - settleRedemption(): approves ("accept") or refunds ("reject") a Channel Points redemption on Kick
+//   - redeemRandomPokemon(): the "Random Pokemon" reward: gives a Pokémon missing from the viewer's Pokédex, or asks for a refund if it cannot
 // ===================================================================
 
 async function triggerSpawn(db, forceShiny = null) {
@@ -1984,9 +2123,12 @@ async function redeemRandomPokemon(db, rawUser, cost, out = {}) { // out.refund 
 
 // ===================================================================
 // 8. CHAT COMMANDS
-// processCommand(): every !command (catch, party, info, release, pokedex, leaderboard, trade, accept, battle,
-// move, forfeit, help, verify, spawn + the hidden mod commands). Also used by the website via runCommand().
-// Just above it: redeemRandomPokemon(), the Channel Points "Random Pokemon" reward.
+// WHAT IT CONTAINS: processCommand(db, user, command, arguments, isMod, isSub, messageTime) is the brain of the bot.
+//   It runs every chat command and returns the text the bot says (or null for nothing). The website calls the same
+//   function, so chat and website always follow the same rules.
+//   Commands: catch, spawncheck/wild, party, info, release, pokedex, leaderboard, trade, accept, battle, move, forfeit,
+//   help/pokemon, verify (website login), spawn (owner/mods/subs), and the hidden owner/mod commands shinyspawn and givedex.
+// CHANGE HERE: to change a command's wording or rule. Keep replies under 500 characters (Kick's limit).
 // ===================================================================
 
 async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub = false, msgTime = Date.now()) {
@@ -2096,7 +2238,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     let reply = `🎉 @${user} caught ${shinyTag}${caughtMon.name} Lv${caughtMon.level} [${caughtMon.types.join('/')}]!${user === AUTO_TRAINER ? '' : ` (${db.users[user].inventory.length}/${maxPartyFor(user)})`} [emote:37232:PeepoClap]`;
     const evoMsg = await checkEvolution(db, user);
     if (evoMsg) reply += ` | ${evoMsg}`;
-    if (user !== AUTO_TRAINER) reply += ` | ${SITE_NOTE}`;
+    if (user !== AUTO_TRAINER) reply += ` | ${CATCH_NOTE}`;
     return reply;
   }
 
@@ -2116,7 +2258,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
   if (cmd === 'party') {
     const inv = db.users[user].inventory;
     const tip = '💡 Have 3 of the same Pokémon and they evolve (if they have an evolution)!';
-    const siteNote = args.length === 0 ? ` | ${SITE_NOTE}` : '';
+    const siteNote = ` | ${SITE_NOTE}`; // shown on every page
     if (inv.length === 0) return `@${user} Your party is empty! Use !catch when a wild Pokémon appears. ${tip}${siteNote}`;
     const PER_PAGE = 15;
     const pages = Math.ceil(inv.length / PER_PAGE);
@@ -2125,7 +2267,9 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const from = (page - 1) * PER_PAGE;
     const list = inv.slice(from, from + PER_PAGE).map((p, i) => `[${from + i + 1}] ${p.isShiny ? '✨' : ''}${p.name}`).join(' | ');
     const pageTxt = pages > 1 ? ` Page ${page}/${pages} (type !party ${page % pages + 1} for more)` : '';
-    return `@${user}'s Party (${inv.length}/${maxPartyFor(user)})${pageTxt}: ${list} | ${tip}${siteNote}`;
+    const head = `@${user}'s Party (${inv.length}/${maxPartyFor(user)})${pageTxt}: ${list}`;
+    const full = `${head} | ${tip}${siteNote}`;
+    return full.length <= 500 ? full : `${head}${siteNote}`; // chat cuts at 500 characters: drop the tip, never the site link
   }
 
   if (cmd === 'info') {
@@ -2162,7 +2306,7 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
     const uniqueCount = db.users[user].pokedex.length;
     const totalCaught = db.users[user].totalCaught;
     const percent = ((uniqueCount / MAX_POKEMON_ID) * 100).toFixed(1);
-    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | 🌐 See all your captured Pokemon and manage your Pokemon here ➡️ ${POKEDEX_SITE}`;
+    return `📖 @${user}'s Pokédex: ${uniqueCount}/${MAX_POKEMON_ID} unique species (${percent}%) | Total Caught: ${totalCaught} | See all your captured Pokemon and manage your Pokemon here ➡️ ${POKEDEX_SITE}`;
   }
 
   if (cmd === 'leaderboard') {
@@ -2219,7 +2363,11 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       await saveDB(db);
       return `🔄 @${user} offered ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! @${target} accepted automatically! @${user}, check @${target}'s party on the site ➡️ ${POKEDEX_SITE} and type !accept <slot> with the slot of the Pokémon you want to receive (slot 1 is untradable).`;
     }
-    db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name };
+    const old = db.pendingTrades[target];
+    if (old && Date.now() - (old.at || 0) < TRADE_OVERWRITE_GUARD_MS && (old.fromUser !== user || old.offeredUid !== mon.uid)) {
+      return `@${user} @${target} has another trade offer open right now. Try again in a minute.`;
+    }
+    db.pendingTrades[target] = { fromUser: user, offeredUid: mon.uid, offeredName: mon.name, at: Date.now() };
     await saveDB(db);
     return `🔄 @${user} wants to trade ${mon.isShiny ? '✨' : ''}${mon.name} to @${target}! Type !accept <yourSlot> to accept.`;
   }
@@ -2237,6 +2385,11 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
       return await processCommand(db, autoKey, 'accept', String(pick), true, false);
     }
     const trade = db.pendingTrades[user];
+    if (trade && Date.now() - (trade.at || 0) > TRADE_OFFER_TTL_MS && !trade.autoAccepted) { // old offers expire
+      delete db.pendingTrades[user];
+      await saveDB(db);
+      return `@${user} That trade offer expired. Ask for a new one!`;
+    }
     if (!trade) return `@${user} No pending trades. When someone offers you a trade with !trade @${user} <slot>, reply with !accept <your slot> to swap Pokémon.`;
     const mySlot = parseInt(args[0]) - 1;
     const myInv = db.users[user].inventory;
@@ -2413,7 +2566,13 @@ async function processCommand(db, rawUser, rawCmd, rawArgs, isMod = false, isSub
 
 // ===================================================================
 // 9. HTTP ROUTES
-// /ping (keep-alive), /spawn (cron job), /kick-webhook (chat messages -> commands, Channel Points rewards), /battle-data (overlay JSON).
+// WHAT IT CONTAINS: the web addresses of the bot itself (the website is section 12).
+//   GET  /ping .......... "Bot is awake!" (the keep-alive job calls it)
+//   GET  /spawn ......... spawns a Pokémon, needs ?secret=BOT_SECRET (the cron job calls it)
+//   POST /kick-webhook .. Kick sends every chat message and Channel Points redemption here. It first checks Kick's
+//                         signature (verifyKickWebhook), ignores duplicates and spammers, then runs the command and posts the reply
+//   GET  /battle-data ... JSON for the OBS overlay (long-polling: answers quickly when something changes)
+//   GET  /assets/... .... the site's CSS/JS files, cached by browsers for a year
 // ===================================================================
 app.get('/ping', (req, res) => res.send('Bot is awake!'));
 
@@ -2481,6 +2640,7 @@ async function verifyKickWebhook(req) {
   return true;
 }
 
+const cmdLastAt = new Map(); // trainer -> time of their last command (spam guard)
 // Direct Kick Webhook Receiver (Listens to Kick chat messages)
 app.post('/kick-webhook', async (req, res) => {
   const verdict = await verifyKickWebhook(req);
@@ -2543,6 +2703,15 @@ app.post('/kick-webhook', async (req, res) => {
     const cmd = parts[0];
     const args = parts.slice(1).join(' ');
 
+    // One command per trainer every 0.8 s: stops a spammer from flooding the bot and chat (the owner is exempt)
+    const nowMs = Date.now();
+    const senderKey = String(sender || '').toLowerCase();
+    if (!isMod) {
+      if (nowMs - (cmdLastAt.get(senderKey) || 0) < 800) return;
+      cmdLastAt.set(senderKey, nowMs);
+      if (cmdLastAt.size > 5000) cmdLastAt.clear();
+    }
+
     const validCmds = ['spawn', 'shinyspawn', 'givedex', 'catch', 'spawncheck', 'wild', 'party', 'info', 'release', 'pokedex', 'leaderboard', 'trade', 'accept', 'battle', 'move', 'forfeit', 'help', 'pokemon', 'verify'];
     if (!validCmds.includes(cmd.toLowerCase())) return;
 
@@ -2573,19 +2742,23 @@ async function buildBattlePayload() {
   const db = await getDB();
   const keys = Object.keys(db.activeBattles || {});
   const activeKey = keys.find(k => db.activeBattles[k].p2Mon) || keys[0];
+  // Only what the overlay draws is sent. The spawn is cut down to six fields, so viewers typing !catch (which changes the
+  // hidden attempts / caughtBy lists) never wake the overlay. The last battle result is only needed for ~20 s after a battle.
+  const sp = db.activeSpawn;
+  const lr = db.lastBattleResult;
   const payload = {
     active: Boolean(activeKey),
     battle: activeKey ? db.activeBattles[activeKey] : null,
-    spawn: db.activeSpawn || null,
-    result: db.lastBattleResult || null,
+    spawn: sp ? { id: sp.id, name: sp.name, types: sp.types, isShiny: sp.isShiny, spawnedAt: sp.spawnedAt, expiresAt: sp.expiresAt } : null,
+    result: lr && Date.now() - lr.at < 25000 ? lr : null,
     limits: { move: MOVE_LIMIT_MS, battle: BATTLE_LIMIT_MS }
   };
   const hash = crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex').slice(0, 12);
   return { payload, hash };
 }
 
-// The overlay sends the fingerprint of what it already has (?h=...). With ?wait=1 the request is held (up to 25 s)
-// until something changes, so an idle overlay makes about 2 requests a minute instead of 60. Nothing changed -> only the clock.
+// The overlay sends the fingerprint of what it already has (?h=...). With ?wait=1 the request is held (up to 50 s)
+// until something changes, so an idle overlay makes about 1 request a minute instead of 60. Nothing changed -> only the clock.
 let waiters = 0;            // overlay requests currently held open
 const MAX_WAITERS = 20;     // more than the few real overlays: extra callers just get a normal quick answer
 app.get('/battle-data', async (req, res) => {
@@ -2595,7 +2768,7 @@ app.get('/battle-data', async (req, res) => {
       let closed = false;
       waiters++;
       req.on('close', () => { closed = true; });
-      const until = Date.now() + 25000;
+      const until = Date.now() + 50000;
       try {
         while (!closed && Date.now() < until) {
           await new Promise((r) => setTimeout(r, 500));
@@ -2651,7 +2824,10 @@ app.get('/assets/:file', (req, res) => {
 
 // ===================================================================
 // 10. OBS OVERLAY PAGE
-// /overlay: Game Boy Color style page for OBS showing the current spawn and battle.
+// WHAT IT CONTAINS: the /overlay page for OBS (transparent background, Game Boy Color style): the wild-Pokémon card at the
+//   top centre and the battle screen at the bottom centre. It is ONE text (HTML + CSS + JS) that the server splits into
+//   separate cached files (see externalizePage).
+// CHANGE HERE: only for looks. Inside this text do not use backticks or ${ } in the page script (it lives inside a template string).
 // ===================================================================
 
 const OVERLAY_HTML = externalizePage(`<!DOCTYPE html>
@@ -3127,12 +3303,12 @@ const OVERLAY_HTML = externalizePage(`<!DOCTYPE html>
     window.addEventListener('resize', layout);
 
     var lastHash = '', lastData = null;
-    // Long polling: the server holds this request until something changes (up to ~25 s), so the overlay asks once per
+    // Long polling: the server holds this request until something changes (up to ~50 s), so the overlay asks once per
     // change instead of once per second.
     async function tick() {
       try {
         var ctl = new AbortController();
-        var killer = setTimeout(function () { ctl.abort(); }, 40000);
+        var killer = setTimeout(function () { ctl.abort(); }, 65000);
         var res = await fetch('/battle-data?wait=1&h=' + lastHash, { signal: ctl.signal });
         var d = await res.json();
         clearTimeout(killer);
@@ -3207,7 +3383,8 @@ app.get('/overlay', (req, res) => { res.send(OVERLAY_HTML); });
 
 // ===================================================================
 // 11. BACKGROUND TIMER
-// Runs every 3 seconds: enforces battle time limits and announces when a wild Pokémon fled.
+// WHAT IT CONTAINS: a timer that runs every 3 seconds: ends battles that ran out of time, cancels challenges nobody
+//   accepted, and announces in chat when a wild Pokémon fled (waits a few seconds so a last-second !catch still counts).
 // ===================================================================
 
 let battleTickRunning = false;
@@ -3277,7 +3454,11 @@ setInterval(async () => {
 
 // ===================================================================
 // 12. WEBSITE (pokedex-site)
-// registerPokedexSite() adds /pokedex and its APIs; PAGE below is the whole front end (HTML + CSS + JS).
+// WHAT IT CONTAINS: the public website.
+//   registerPokedexSite() adds /pokedex and its APIs: /api/pokedex (all data for the page), /api/login/start + /api/login/status
+//   (login with a !verify code typed in chat), /api/me, /api/logout, /api/release, /api/play/state + /api/play/action (battles and trades from the site).
+//   PAGE below is the whole front end (HTML + CSS + JS in one text).
+// CHANGE HERE: to change the look or texts of the site. Inside PAGE do not use backticks or ${ }; escape backslashes twice.
 // ===================================================================
 
 // Public website for the Pokémon bot: animated top-10 catch leaderboard, every trainer's Pokédex,
@@ -4642,7 +4823,9 @@ const SITE_HTML = externalizePage(PAGE, 'site');
 
 // ===================================================================
 // 13. START-UP
-// Helpers that run bot commands for website-logged-in trainers, route registration and listen().
+// WHAT IT CONTAINS: runCommand()/runCommands() let the website run chat commands for a logged-in viewer (and post the
+//   result in chat); then the website is registered, the final error handler and crash guards are installed, and
+//   app.listen() starts the server.
 // ===================================================================
 
 // Runs a bot command on behalf of a website-logged-in trainer (same rules as typing it in chat) and posts the result to the stream chat.
@@ -4687,7 +4870,7 @@ registerPokedexSite(app, { getDB, saveDB, lockDB, runCommand, runCommands, MOVE_
 const PORT = process.env.PORT || 3000;
 // Last line of defence: a bad request (for example broken JSON) gets a short answer instead of a stack trace, and a stray
 // error somewhere never takes the whole bot down (Node would otherwise exit and Render would restart it).
-app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+app.use((err, req, res, next) => {
   if (res.headersSent) return;
   res.status(err && err.status >= 400 && err.status < 500 ? err.status : 500).type('text').send('Bad request');
 });
